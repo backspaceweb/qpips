@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/api/generated/api.swagger.dart';
 import '../domain/account.dart';
+import '../domain/order_control_settings.dart';
 import '../domain/trade_order.dart';
 
 class TradingRepository {
@@ -122,23 +123,39 @@ class TradingRepository {
     }
   }
 
-  Future<Map<String, dynamic>> getMT5RiskSettings(int userId) async {
+  /// Read the slave's risk multiplier + stops/limits config.
+  /// Dispatches MT4/MT5 by [account.platform].
+  Future<Map<String, dynamic>> getRiskSettings({required Account account}) async {
     try {
-      final riskResponse = await _api.apiV1Mt5GetRiskGet(userId: userId);
-      final stopsResponse = await _api.apiV1Mt5GetStopsLimitsGet(userId: userId);
-
+      Response<Risk> riskResponse;
+      Response<StopsLimits> stopsResponse;
+      switch (account.platform) {
+        case Platform.mt5:
+          riskResponse = await _api.apiV1Mt5GetRiskGet(userId: account.serverId);
+          stopsResponse = await _api.apiV1Mt5GetStopsLimitsGet(userId: account.serverId);
+          break;
+        case Platform.mt4:
+          riskResponse = await _api.apiV1Mt4GetRiskGet(userId: account.serverId);
+          stopsResponse = await _api.apiV1Mt4GetStopsLimitsGet(userId: account.serverId);
+          break;
+        default:
+          return {'risk': null, 'stops': null};
+      }
       return {
         'risk': riskResponse.isSuccessful ? riskResponse.body : null,
         'stops': stopsResponse.isSuccessful ? stopsResponse.body : null,
       };
     } catch (e) {
-      if (kDebugMode) print('Error fetching MT5 risk settings: $e');
+      if (kDebugMode) print('getRiskSettings error: $e');
       return {'risk': null, 'stops': null};
     }
   }
 
-  Future<bool> updateMT5RiskSettings({
-    required int userId,
+  /// Persist the slave's risk multiplier + stops/limits config.
+  /// Dispatches MT4/MT5 by [account.platform]. Returns true only if BOTH
+  /// the Risk and StopsLimits writes succeeded.
+  Future<bool> updateRiskSettings({
+    required Account account,
     required int riskType,
     required double multiplier,
     required bool copySLTP,
@@ -147,25 +164,128 @@ class TradingRepository {
     required int scalperValue,
   }) async {
     try {
-      // Risk Settings
-      final riskResponse = await _api.apiV1Mt5UpdateRiskPost(
-        userId: userId,
-        riskType: ApiV1Mt5UpdateRiskPostRiskType.values[riskType],
-        multiplier: multiplier,
-      );
-
-      // Stops/Limits Settings
-      final stopsResponse = await _api.apiV1Mt5UpdateStopsLimitsPost(
-        userId: userId,
-        copySLTP: copySLTP,
-        scalperMode: ApiV1Mt5UpdateStopsLimitsPostScalperMode.values[scalperMode],
-        orderFilter: ApiV1Mt5UpdateStopsLimitsPostOrderFilter.values[orderFilter],
-        scalperValue: scalperValue,
-      );
-
+      Response riskResponse;
+      Response stopsResponse;
+      switch (account.platform) {
+        case Platform.mt5:
+          riskResponse = await _api.apiV1Mt5UpdateRiskPost(
+            userId: account.serverId,
+            riskType: ApiV1Mt5UpdateRiskPostRiskType.values[riskType],
+            multiplier: multiplier,
+          );
+          stopsResponse = await _api.apiV1Mt5UpdateStopsLimitsPost(
+            userId: account.serverId,
+            copySLTP: copySLTP,
+            scalperMode: ApiV1Mt5UpdateStopsLimitsPostScalperMode.values[scalperMode],
+            orderFilter: ApiV1Mt5UpdateStopsLimitsPostOrderFilter.values[orderFilter],
+            scalperValue: scalperValue,
+          );
+          break;
+        case Platform.mt4:
+          riskResponse = await _api.apiV1Mt4UpdateRiskPost(
+            userId: account.serverId,
+            riskType: ApiV1Mt4UpdateRiskPostRiskType.values[riskType],
+            multiplier: multiplier,
+          );
+          stopsResponse = await _api.apiV1Mt4UpdateStopsLimitsPost(
+            userId: account.serverId,
+            copySLTP: copySLTP,
+            scalperMode: ApiV1Mt4UpdateStopsLimitsPostScalperMode.values[scalperMode],
+            orderFilter: ApiV1Mt4UpdateStopsLimitsPostOrderFilter.values[orderFilter],
+            scalperValue: scalperValue,
+          );
+          break;
+        default:
+          return false;
+      }
       return riskResponse.isSuccessful && stopsResponse.isSuccessful;
     } catch (e) {
-      if (kDebugMode) print('Error updating MT5 risk settings: $e');
+      if (kDebugMode) print('updateRiskSettings error: $e');
+      return false;
+    }
+  }
+
+  // --- B2.1: Order Control settings (advanced auto-close) ---
+  //
+  // Read returns the swagger-generated FollowRiskSetting (21 fields, 10 of
+  // which are server-computed ranges). We extract the 11 user-editable
+  // fields into the typed OrderControlSettings.
+  //
+  // Write takes the 11 editable fields. Setting a field to 0 disables
+  // that auto-close trigger.
+
+  /// Read the slave's auto-close / equity-protection settings.
+  /// Returns [OrderControlSettings.empty] on failure or unsupported platform.
+  Future<OrderControlSettings> getOrderControlSettings({required Account account}) async {
+    try {
+      Response<FollowRiskSetting> response;
+      switch (account.platform) {
+        case Platform.mt5:
+          response = await _api.apiV1Mt5GetOrderControlSettingsGet(userId: account.serverId);
+          break;
+        case Platform.mt4:
+          response = await _api.apiV1Mt4GetOrderControlSettingsGet(userId: account.serverId);
+          break;
+        default:
+          return OrderControlSettings.empty;
+      }
+      if (response.isSuccessful && response.body != null) {
+        return OrderControlSettings.fromFollowRiskSetting(response.body!);
+      }
+      return OrderControlSettings.empty;
+    } catch (e) {
+      if (kDebugMode) print('getOrderControlSettings error: $e');
+      return OrderControlSettings.empty;
+    }
+  }
+
+  /// Persist the slave's auto-close / equity-protection settings.
+  /// Returns true on HTTP 2xx success.
+  Future<bool> updateOrderControlSettings({
+    required Account account,
+    required OrderControlSettings settings,
+  }) async {
+    try {
+      Response response;
+      switch (account.platform) {
+        case Platform.mt5:
+          response = await _api.apiV1Mt5UpdateOrderControlSettingPost(
+            userId: account.serverId,
+            profitOverPoint: settings.profitOverPoint,
+            lossOverPoint: settings.lossOverPoint,
+            profitForEveryOrder: settings.profitForEveryOrder,
+            lossForEveryOrder: settings.lossForEveryOrder,
+            profitForAllOrder: settings.profitForAllOrder,
+            lossForAllOrder: settings.lossForAllOrder,
+            equityUnderLow: settings.equityUnderLow,
+            equityUnderHigh: settings.equityUnderHigh,
+            pendingOrderProfitPoint: settings.pendingOrderProfitPoint,
+            pendingOrderLossPoint: settings.pendingOrderLossPoint,
+            pendingTimeout: settings.pendingTimeout,
+          );
+          break;
+        case Platform.mt4:
+          response = await _api.apiV1Mt4UpdateOrderControlSettingPost(
+            userId: account.serverId,
+            profitOverPoint: settings.profitOverPoint,
+            lossOverPoint: settings.lossOverPoint,
+            profitForEveryOrder: settings.profitForEveryOrder,
+            lossForEveryOrder: settings.lossForEveryOrder,
+            profitForAllOrder: settings.profitForAllOrder,
+            lossForAllOrder: settings.lossForAllOrder,
+            equityUnderLow: settings.equityUnderLow,
+            equityUnderHigh: settings.equityUnderHigh,
+            pendingOrderProfitPoint: settings.pendingOrderProfitPoint,
+            pendingOrderLossPoint: settings.pendingOrderLossPoint,
+            pendingTimeout: settings.pendingTimeout,
+          );
+          break;
+        default:
+          return false;
+      }
+      return response.isSuccessful;
+    } catch (e) {
+      if (kDebugMode) print('updateOrderControlSettings error: $e');
       return false;
     }
   }

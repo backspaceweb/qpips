@@ -377,14 +377,15 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     DataCell(Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Risk Settings only apply to slaves (they configure how
-                        // the slave copies the master's signals). Masters trade
-                        // manually and have nothing to risk-manage on this surface.
-                        if (acc.platform == Platform.mt5 && !acc.isMaster)
+                        // Slave Settings (Risk & Stops + Order Control) apply
+                        // only to slaves — masters trade manually and have no
+                        // risk-management surface here. Supported on MT4 + MT5.
+                        if (!acc.isMaster &&
+                            (acc.platform == Platform.mt5 || acc.platform == Platform.mt4))
                           IconButton(
                             icon: const Icon(Icons.settings_outlined, size: 20, color: Color(0xFF6366F1)),
                             onPressed: () => _showRiskSettings(acc),
-                            tooltip: 'Risk Settings',
+                            tooltip: 'Slave Settings',
                           ),
                         IconButton(
                           icon: const Icon(Icons.info_outline, size: 20),
