@@ -1,10 +1,10 @@
-import 'dart:convert';
 import 'dart:async';
 import 'widgets/price_ticker.dart';
 import 'widgets/mt5_risk_dialog.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../../domain/account.dart';
 import '../../../repositories/trading_repository.dart';
 import '../../../repositories/auth_repository.dart';
 
@@ -24,8 +24,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     'activeTrades': 'No active trades',
     'latency': 'Checking...',
   };
-  List<Map<String, dynamic>> _accounts = [];
-  List<int> _registeredUserIds = [];
+  List<Account> _accounts = [];
   Timer? _refreshTimer;
 
   @override
@@ -46,70 +45,31 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // SMART SYNC: Only fetch data when the user actually brings the app to foreground
     if (state == AppLifecycleState.resumed) {
-      print('DEBUG: App resumed, triggering smart sync...');
+      if (kDebugMode) print('DEBUG: App resumed, triggering smart sync...');
       _refreshData(silent: true);
     }
   }
 
   Future<void> _loadInitialData({bool silent = false}) async {
     if (!silent) setState(() => _isLoading = true);
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> savedIds = prefs.getStringList('registeredUserIds') ?? [];
-    final String? metadataJson = prefs.getString('accountMetadata');
-    Map<String, dynamic> metadata = {};
-    if (metadataJson != null) {
-      try {
-        metadata = jsonDecode(metadataJson);
-      } catch (e) {
-        print('Error decoding metadata: $e');
-      }
-    }
-    
-    // IMMEDIATE STATE UPDATE: Use local data while sync is happening
-    setState(() {
-      _registeredUserIds = savedIds.map((id) => int.parse(id)).toList();
-      // Pre-populate _accounts with what we know from local storage
-      _accounts = _registeredUserIds.map((id) {
-        final idStr = id.toString();
-        final m = metadata[idStr];
-        return {
-          'id': idStr,
-          'accountName': m?['accountName'] ?? 'Loading...',
-          'accountNumber': m?['accountNumber'] ?? idStr,
-          'accountType': m?['accountType'] ?? 'Unknown',
-          'platform': m?['platform'] ?? 'MT4',
-          'status': 'Offline',
-          'balance': '0.00',
-          'equity': '0.00',
-        };
-      }).toList();
-    });
 
-    // Run server sync
     final repo = context.read<TradingRepository>();
     final synchedAccounts = await repo.syncAccountsWithServer();
-    
+
     if (mounted) {
       setState(() {
         _accounts = synchedAccounts;
-        _registeredUserIds = synchedAccounts.map((a) => int.parse(a['id'])).toList();
         if (!silent) _isLoading = false;
       });
     }
-    
-    _refreshData(silent: silent);
-  }
 
-  Future<void> _saveAccounts() async {
-    // Registered IDs are now handled by Supabase, but we keep this for basic session persistence if needed
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('registeredUserIds', _registeredUserIds.map((id) => id.toString()).toList());
+    _refreshData(silent: silent);
   }
 
   Future<void> _refreshData({bool silent = false}) async {
     if (!silent) setState(() => _isLoading = true);
     final repo = context.read<TradingRepository>();
-    
+
     final results = await Future.wait([
       repo.getDashboardMetrics(),
       repo.syncAccountsWithServer(),
@@ -118,9 +78,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     if (mounted) {
       setState(() {
         _metrics = results[0] as Map<String, dynamic>;
-        _accounts = results[1] as List<Map<String, dynamic>>;
-        _registeredUserIds = _accounts.map((a) => int.parse(a['id'])).toList();
-        
+        _accounts = results[1] as List<Account>;
         if (!silent) _isLoading = false;
       });
     }
@@ -130,17 +88,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void _startDiscoveryLoop({int retries = 3}) async {
     if (retries <= 0 || !mounted) return;
 
-    print('DEBUG: Discovery Loop pulse ($retries retries left)');
+    if (kDebugMode) print('DEBUG: Discovery Loop pulse ($retries retries left)');
     await _loadInitialData(silent: true);
 
     // Check if we still have temporary IDs (long IDs like 415614138)
-    bool hasTempIds = _registeredUserIds.any((id) => id.toString().length > 8);
+    final hasTempIds = _accounts.any((a) => a.serverId.toString().length > 8);
 
     if (hasTempIds) {
       // Wait 5 seconds between retries instead of 2
       Future.delayed(const Duration(seconds: 5), () => _startDiscoveryLoop(retries: retries - 1));
     } else {
-      print('DEBUG: Discovery successful, all IDs permanent.');
+      if (kDebugMode) print('DEBUG: Discovery successful, all IDs permanent.');
     }
   }
 
@@ -375,65 +333,74 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   DataColumn(label: Text('Status')),
                   DataColumn(label: Text('Actions')),
                 ],
-                rows: _accounts.map((acc) => DataRow(cells: [
-                  DataCell(Text(acc['id']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.w500))),
-                  DataCell(Text(acc['accountName']?.toString() ?? 'Pending...')),
-                  DataCell(Text(
-                    // If accountNumber matches ID, it means we don't have the real login yet
-                    (acc['accountNumber'] == acc['id'] && acc['id'].toString().length < 7) 
-                      ? 'Connecting...' 
-                      : (acc['accountNumber']?.toString() ?? 'N/A')
-                  )),
-                  DataCell(Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: (acc['accountType'] == 'Master' ? Colors.purple : Colors.teal).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(acc['accountType'] ?? 'Unknown', style: TextStyle(color: acc['accountType'] == 'Master' ? Colors.purple : Colors.teal, fontSize: 12, fontWeight: FontWeight.bold)),
-                  )),
-                  DataCell(Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: (acc['platform'] == 'MT5' ? Colors.blue : Colors.orange).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(acc['platform'] ?? 'MT4', style: TextStyle(color: acc['platform'] == 'MT5' ? Colors.blue : Colors.orange, fontSize: 12, fontWeight: FontWeight.bold)),
-                  )),
-                  DataCell(Text('\$${acc['balance'] ?? '0.00'}')),
-                  DataCell(Text('\$${acc['equity'] ?? '0.00'}')),
-                  DataCell(Switch(
-                    value: acc['status'] == 'CONNECTED' || acc['status'] == 'Online',
-                    activeColor: Colors.green,
-                    onChanged: (val) => _toggleActivation(acc, val),
-                  )),
-                  DataCell(Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (acc['platform'] == 'MT5')
+                rows: _accounts.map((acc) {
+                  final masterColor = acc.isMaster ? Colors.purple : Colors.teal;
+                  final platformColor = acc.platform == Platform.mt5 ? Colors.blue : Colors.orange;
+                  // If loginNumber matches serverId AND it's a short id, the
+                  // server hasn't issued the platform login yet.
+                  final loginPending = acc.loginNumber == acc.serverId.toString() &&
+                      acc.serverId.toString().length < 7;
+                  return DataRow(cells: [
+                    DataCell(Text(acc.serverId.toString(), style: const TextStyle(fontWeight: FontWeight.w500))),
+                    DataCell(Text(acc.accountName.isEmpty ? 'Pending...' : acc.accountName)),
+                    DataCell(Text(loginPending ? 'Connecting...' : acc.loginNumber)),
+                    DataCell(Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: masterColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        acc.accountType.wireValue,
+                        style: TextStyle(color: masterColor, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    )),
+                    DataCell(Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: platformColor.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        acc.platform.wireValue,
+                        style: TextStyle(color: platformColor, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    )),
+                    DataCell(Text('\$${acc.balance}')),
+                    DataCell(Text('\$${acc.equity}')),
+                    DataCell(Switch(
+                      value: acc.isOnline,
+                      activeColor: Colors.green,
+                      onChanged: (val) => _toggleActivation(acc, val),
+                    )),
+                    DataCell(Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (acc.platform == Platform.mt5)
+                          IconButton(
+                            icon: const Icon(Icons.settings_outlined, size: 20, color: Color(0xFF6366F1)),
+                            onPressed: () => _showRiskSettings(acc),
+                            tooltip: 'Risk Settings',
+                          ),
                         IconButton(
-                          icon: const Icon(Icons.settings_outlined, size: 20, color: Color(0xFF6366F1)),
-                          onPressed: () => _showRiskSettings(acc),
-                          tooltip: 'Risk Settings',
+                          icon: const Icon(Icons.info_outline, size: 20),
+                          onPressed: () => _showAccountDetails(context, acc.serverId),
+                          tooltip: 'Details',
                         ),
-                      IconButton(
-                        icon: const Icon(Icons.info_outline, size: 20),
-                        onPressed: () => _showAccountDetails(context, int.parse(acc['id'])),
-                        tooltip: 'Details',
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blueAccent),
-                        onPressed: () => _showAccountForm(context, account: acc),
-                        tooltip: 'Edit',
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                        onPressed: () => _showDeleteConfirmation(context, acc),
-                        tooltip: 'Delete',
-                      ),
-                    ],
-                  )),
-                ])).toList(),
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blueAccent),
+                          onPressed: () => _showAccountForm(context, account: acc),
+                          tooltip: 'Edit',
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                          onPressed: () => _showDeleteConfirmation(context, acc),
+                          tooltip: 'Delete',
+                        ),
+                      ],
+                    )),
+                  ]);
+                }).toList(),
               ),
             ),
         ],
@@ -441,42 +408,23 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  Widget _buildStatusBadge(String status) {
-    final isOnline = status == 'Online';
-    final color = isOnline ? Colors.green : Colors.redAccent;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 8),
-          Text(status, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _toggleActivation(Map<String, dynamic> acc, bool value) async {
+  Future<void> _toggleActivation(Account acc, bool value) async {
     final repo = context.read<TradingRepository>();
     final success = await repo.toggleAccountActivation(
-      userId: int.parse(acc['id']),
-      isMaster: acc['accountType'] == 'Master',
+      userId: acc.serverId,
+      isMaster: acc.isMaster,
       activate: value,
     );
 
     if (success) {
       setState(() {
-        acc['status'] = value ? 'CONNECTED' : 'DISCONNECTED';
+        // Account is immutable; replace the entry with a status-updated copy.
+        final idx = _accounts.indexWhere((a) => a.serverId == acc.serverId);
+        if (idx != -1) {
+          _accounts[idx] = _accounts[idx].copyWith(
+            status: value ? 'CONNECTED' : 'DISCONNECTED',
+          );
+        }
       });
       // SMART SYNC: Trigger background refresh to confirm status with API
       _refreshData(silent: true);
@@ -491,10 +439,16 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     }
   }
 
-  void _showRiskSettings(Map<String, dynamic> acc) {
+  void _showRiskSettings(Account acc) {
     showDialog(
       context: context,
-      builder: (context) => Mt5RiskDialog(account: acc),
+      // Mt5RiskDialog still consumes a Map<String, dynamic>; convert at boundary.
+      // It will be migrated to take Account directly in a later refactor.
+      builder: (context) => Mt5RiskDialog(account: {
+        'id': acc.serverId.toString(),
+        'accountNumber': acc.loginNumber,
+        'accountName': acc.accountName,
+      }),
     );
   }
 
@@ -536,13 +490,13 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  void _showAccountForm(BuildContext context, {Map<String, dynamic>? account}) {
+  void _showAccountForm(BuildContext context, {Account? account}) {
     final isEditing = account != null;
-    final accountNameController = TextEditingController(text: isEditing ? (account['accountName'] ?? '') : '');
-    final accountNumberController = TextEditingController(text: isEditing ? (account['accountNumber'] ?? '') : '');
+    final accountNameController = TextEditingController(text: isEditing ? account.accountName : '');
+    final accountNumberController = TextEditingController(text: isEditing ? account.loginNumber : '');
     final passwordController = TextEditingController();
     final serverController = TextEditingController();
-    
+
     // Additional controllers for other platforms
     final clientIdController = TextEditingController();
     final clientSecretController = TextEditingController();
@@ -551,9 +505,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     final emailController = TextEditingController();
     final userNameController = TextEditingController();
     final brokerIdController = TextEditingController();
-    
-    String platformType = isEditing ? (account['platform'] ?? 'MT4') : 'MT4';
-    bool isMaster = isEditing ? (account['accountType'] == 'Master') : true;
+
+    String platformType = isEditing ? account.platform.wireValue : 'MT4';
+    bool isMaster = isEditing ? account.isMaster : true;
     final masterIdController = TextEditingController();
     bool isSubmitting = false;
 
@@ -670,32 +624,22 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             ),
             ElevatedButton(
               onPressed: isSubmitting ? null : () async {
-                print('DEBUG: Submit button pressed');
                 if (accountNumberController.text.isEmpty) {
                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Account Number is required')));
                    return;
                 }
-                
+
                 setDialogState(() => isSubmitting = true);
-                print('DEBUG: isSubmitting set to true');
-                
+
                 final repo = context.read<TradingRepository>();
                 final tradeAccountNumber = int.tryParse(accountNumberController.text);
                 if (tradeAccountNumber == null) {
-                   print('DEBUG: Invalid account number format');
                    setDialogState(() => isSubmitting = false);
                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid Account Number format')));
                    return;
                 }
-                
-                print('\n--- [SUPABASE FORM SUBMIT] ---');
-                print('Platform: $platformType');
-                print('Account Name: ${accountNameController.text}');
-                print('Account Number (Login): ${accountNumberController.text}');
-                print('Type: ${isMaster ? 'Master' : 'Slave'}');
-                print('-----------------------------\n');
 
-                final result = isEditing 
+                final result = isEditing
                   ? await repo.updateTradingAccount(
                       userId: tradeAccountNumber,
                       platformType: platformType,
@@ -715,9 +659,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                       masterId: isMaster ? null : int.tryParse(masterIdController.text),
                     );
 
-                  print('DEBUG: Repository call result: $result');
-                  
-                  if (context.mounted) {
+                if (context.mounted) {
                   setDialogState(() => isSubmitting = false);
                   final message = result['message'];
                   final isSuccess = result['success'] == true;
@@ -725,55 +667,39 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-                  
-                  if (isSuccess) {
-                    final storedId = apiId ?? tradeAccountNumber.toString();
-                    
-                    if (!isEditing) {
-                      final newId = int.tryParse(storedId) ?? tradeAccountNumber;
-                      if (!_registeredUserIds.contains(newId)) {
-                         _registeredUserIds.add(newId);
-                      }
-                      
-                      final newAccount = {
-                        'id': storedId,
-                        'accountName': result['accountName'] ?? accountNameController.text,
-                        'accountNumber': result['accountNumber'] ?? tradeAccountNumber.toString(),
-                        'accountType': result['accountType'] ?? (isMaster ? 'Master' : 'Slave'),
-                        'platform': result['platform'] ?? platformType,
-                        'status': 'Offline',
-                        'balance': '0.00',
-                        'equity': '0.00',
-                      };
 
-                      final existingIndex = _accounts.indexWhere((acc) => acc['id'] == storedId);
+                  if (isSuccess) {
+                    final newServerId = int.tryParse(apiId?.toString() ?? '') ?? tradeAccountNumber;
+
+                    if (!isEditing) {
+                      final newAccount = Account(
+                        serverId: newServerId,
+                        loginNumber: tradeAccountNumber.toString(),
+                        accountName: accountNameController.text,
+                        accountType: isMaster ? AccountType.master : AccountType.slave,
+                        platform: Platform.parse(platformType),
+                        masterId: isMaster ? null : int.tryParse(masterIdController.text),
+                      );
+
+                      final existingIndex = _accounts.indexWhere((a) => a.serverId == newServerId);
                       if (existingIndex != -1) {
                         _accounts[existingIndex] = newAccount;
                       } else {
                         _accounts.add(newAccount);
                       }
                     } else {
-                      final index = _accounts.indexWhere((acc) => acc['id'] == account['id']);
+                      final index = _accounts.indexWhere((a) => a.serverId == account.serverId);
                       if (index != -1) {
-                        _accounts[index]['platform'] = platformType;
-                        _accounts[index]['accountType'] = isMaster ? 'Master' : 'Slave';
-                        _accounts[index]['accountName'] = accountNameController.text;
-                        _accounts[index]['accountNumber'] = accountNumberController.text;
+                        _accounts[index] = _accounts[index].copyWith(
+                          platform: Platform.parse(platformType),
+                          accountType: isMaster ? AccountType.master : AccountType.slave,
+                          accountName: accountNameController.text,
+                          loginNumber: accountNumberController.text,
+                        );
                       }
                     }
-                    
-                    await _saveAccounts();
-                    _startDiscoveryLoop(); // Start dynamic discovery loop
 
-                    // Log the final state in the dashboard for this account
-                    final finalAcc = _accounts.firstWhere((acc) => acc['id'] == storedId, orElse: () => {});
-                    print('\n--- [DASHBOARD STATE AFTER REGISTRATION] ---');
-                    print('Account ID: ${finalAcc['id']}');
-                    print('Name: ${finalAcc['accountName']}');
-                    print('Number: ${finalAcc['accountNumber']}');
-                    print('Platform: ${finalAcc['platform']}');
-                    print('Type: ${finalAcc['accountType']}');
-                    print('--------------------------------------------\n');
+                    _startDiscoveryLoop(); // Start dynamic discovery loop
                   }
                 }
               },
@@ -791,58 +717,40 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  void _showDeleteConfirmation(BuildContext context, Map<String, dynamic> account) {
+  void _showDeleteConfirmation(BuildContext context, Account account) {
     bool isDeleting = false;
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('Delete Account'),
-          content: Text('Are you sure you want to delete account ${account['id']}?'),
+          content: Text('Are you sure you want to delete account ${account.serverId}?'),
           actions: [
             TextButton(onPressed: isDeleting ? null : () => Navigator.pop(context), child: const Text('Cancel')),
             ElevatedButton(
               onPressed: isDeleting ? null : () async {
                 final repo = context.read<TradingRepository>();
-                final userId = int.parse(account['id']);
-                final isMaster = account['accountType'] == 'Master';
-                
-                setDialogState(() => isDeleting = true); 
+
+                setDialogState(() => isDeleting = true);
 
                 final result = await repo.deleteTradingAccount(
-                  userId: userId, 
-                  isMaster: isMaster,
-                  platform: account['platform'],
-                  loginNumber: account['accountNumber']?.toString(),
+                  userId: account.serverId,
+                  isMaster: account.isMaster,
+                  platform: account.platform.wireValue,
+                  loginNumber: account.loginNumber,
                 );
-                
+
                 if (context.mounted) {
                   setDialogState(() => isDeleting = false);
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
                   if (result.toLowerCase().contains('success')) {
-                    _registeredUserIds.removeWhere((id) => id == userId);
-                    
-                    // CLEAN-ON-DELETE: Purge all metadata keys associated with this account
-                    final prefs = await SharedPreferences.getInstance();
-                    final String? metadataJson = prefs.getString('accountMetadata');
-                    if (metadataJson != null) {
-                      Map<String, dynamic> metadata = jsonDecode(metadataJson);
-                      final accountNumber = account['accountNumber']?.toString();
-                      
-                      metadata.remove(userId.toString()); // Remove by ID
-                      if (accountNumber != null) metadata.remove(accountNumber); // Remove by Login
-                      
-                      await prefs.setString('accountMetadata', jsonEncode(metadata));
-                    }
-                    
-                    await _saveAccounts();
-                    await _refreshData(); 
+                    await _refreshData();
                   }
                 }
               },
               style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
-              child: isDeleting 
+              child: isDeleting
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                 : const Text('Delete'),
             ),

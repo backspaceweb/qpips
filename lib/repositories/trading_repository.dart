@@ -3,6 +3,7 @@ import 'package:chopper/chopper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/api/generated/api.swagger.dart';
+import '../domain/account.dart';
 
 class TradingRepository {
   final Api _api;
@@ -617,7 +618,7 @@ class TradingRepository {
     }
   }
 
-  Future<List<Map<String, dynamic>>> syncAccountsWithServer() async {
+  Future<List<Account>> syncAccountsWithServer() async {
     try {
       // 1. FETCH FROM CLOUD (Primary Source)
       final cloudAccounts = await fetchAccountsFromCloud();
@@ -629,29 +630,32 @@ class TradingRepository {
           : [];
 
       // 3. GET STATUSES
-      final List<int> idsToCheck = {...serverIds, ...cloudAccounts.map((a) => int.tryParse(a['server_id'] ?? a['login_number'] ?? '') ?? 0)}
-          .where((id) => id != 0).toSet().toList();
+      final List<int> idsToCheck = {
+        ...serverIds,
+        ...cloudAccounts.map((a) =>
+            int.tryParse(a['server_id'] ?? a['login_number'] ?? '') ?? 0)
+      }.where((id) => id != 0).toSet().toList();
       final statuses = idsToCheck.isNotEmpty ? await getStatusByIds(idsToCheck) : [];
 
-      final List<Map<String, dynamic>> synchedAccounts = [];
+      final List<Account> synchedAccounts = [];
       final Set<String> linkedServerIds = {};
 
       // 4. PROCESS CLOUD ACCOUNTS FIRST (Ensures Names/Platforms are correct)
       for (final cloudAcc in cloudAccounts) {
         final login = cloudAcc['login_number'].toString();
         var serverId = cloudAcc['server_id']?.toString();
-        
+
         // AUTO-LINK: If server has an ID that we don't recognize yet, link it to this cloud account
         if (serverId == null || serverId == login) {
-           final newServerId = serverIds.firstWhere(
-             (sId) => sId.toString() != login && !cloudAccounts.any((a) => a['server_id'] == sId.toString()),
-             orElse: () => 0,
-           );
-           if (newServerId != 0) {
-             serverId = newServerId.toString();
-             await updateServerIdInCloud(login, serverId);
-             if (kDebugMode) print('DEBUG: Linked $login to new Server ID $serverId');
-           }
+          final newServerId = serverIds.firstWhere(
+            (sId) => sId.toString() != login && !cloudAccounts.any((a) => a['server_id'] == sId.toString()),
+            orElse: () => 0,
+          );
+          if (newServerId != 0) {
+            serverId = newServerId.toString();
+            await updateServerIdInCloud(login, serverId);
+            if (kDebugMode) print('DEBUG: Linked $login to new Server ID $serverId');
+          }
         }
 
         if (serverId != null) linkedServerIds.add(serverId);
@@ -662,39 +666,50 @@ class TradingRepository {
           orElse: () => UserStatusDto(userId: 0, status: 'Offline'),
         );
 
-        synchedAccounts.add({
-          'id': serverId ?? login,
-          'accountName': cloudAcc['account_name'],
-          'accountNumber': login,
-          'accountType': cloudAcc['account_type'],
-          'platform': cloudAcc['platform'],
-          'status': statusDto.status ?? 'Offline',
-          'balance': '0.00',
-          'equity': '0.00',
-        });
+        synchedAccounts.add(Account(
+          serverId: int.tryParse(serverId ?? login) ?? 0,
+          loginNumber: login,
+          accountName: (cloudAcc['account_name'] ?? '').toString(),
+          accountType: AccountType.parse(cloudAcc['account_type']),
+          platform: Platform.parse(cloudAcc['platform']),
+          status: statusDto.status ?? 'Offline',
+          masterId: int.tryParse((cloudAcc['master_id'] ?? '').toString()),
+        ));
       }
 
       // 5. ADD UNRECOGNIZED SERVER ACCOUNTS (Fallback)
+      // NOTE: heuristic — we have no metadata for server-only IDs, so we
+      // guess type/platform from the ID prefix. This is wrong for many
+      // brokers; once an account is registered through this app, the
+      // cloud row in step 4 overrides this guess.
       for (final sId in serverIds) {
         if (linkedServerIds.contains(sId.toString())) continue;
-        
-        final statusDto = statuses.firstWhere((s) => s.userId == sId, orElse: () => UserStatusDto(userId: 0, status: 'Offline'));
-        synchedAccounts.add({
-          'id': sId.toString(),
-          'accountName': 'Account $sId',
-          'accountNumber': sId.toString(),
-          'accountType': sId.toString().startsWith('5') ? 'Slave' : 'Master',
-          'platform': sId.toString().startsWith('5') ? 'MT5' : 'MT4',
-          'status': statusDto.status ?? 'Offline',
-          'balance': '0.00',
-          'equity': '0.00',
-        });
+
+        final statusDto = statuses.firstWhere(
+          (s) => s.userId == sId,
+          orElse: () => UserStatusDto(userId: 0, status: 'Offline'),
+        );
+        final guessedType = sId.toString().startsWith('5')
+            ? AccountType.slave
+            : AccountType.master;
+        final guessedPlatform = sId.toString().startsWith('5')
+            ? Platform.mt5
+            : Platform.mt4;
+
+        synchedAccounts.add(Account(
+          serverId: sId,
+          loginNumber: sId.toString(),
+          accountName: 'Account $sId',
+          accountType: guessedType,
+          platform: guessedPlatform,
+          status: statusDto.status ?? 'Offline',
+        ));
       }
 
       if (kDebugMode) {
         print('\n--- [DASHBOARD TABLE DATA FROM CLOUD + SERVER] ---');
-        for (var acc in synchedAccounts) {
-          print('Row -> ID: ${acc['id']}, Name: ${acc['accountName']}, Login: ${acc['accountNumber']}, Platform: ${acc['platform']}, Type: ${acc['accountType']}');
+        for (final acc in synchedAccounts) {
+          print('Row -> ID: ${acc.serverId}, Name: ${acc.accountName}, Login: ${acc.loginNumber}, Platform: ${acc.platform.wireValue}, Type: ${acc.accountType.wireValue}');
         }
         print('--------------------------------------------------\n');
       }
