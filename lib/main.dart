@@ -9,10 +9,20 @@ import 'features/dashboard/presentation/dashboard_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  if (supabaseUrl.isEmpty || supabaseKey.isEmpty) {
+    print('DEBUG WARNING: Supabase credentials are MISSING. Cloud features will not work.');
+    print('Use --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=... when running.');
+  } else {
+    print('DEBUG: Supabase credentials detected. Connecting to cloud...');
+  }
+
   // Initialize Supabase using environment variables
   await Supabase.initialize(
-    url: const String.fromEnvironment('SUPABASE_URL'),
-    anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+    url: supabaseUrl,
+    anonKey: supabaseKey,
   );
 
   final prefs = await SharedPreferences.getInstance();
