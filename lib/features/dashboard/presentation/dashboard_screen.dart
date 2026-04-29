@@ -219,7 +219,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: (hasKey ? Colors.green : Colors.red).withOpacity(0.1),
+                  color: (hasKey ? Colors.green : Colors.red).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -261,7 +261,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E293B) : Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05)),
+          border: Border.all(color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -284,7 +284,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05)),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -384,7 +384,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           ),
                         IconButton(
                           icon: const Icon(Icons.info_outline, size: 20),
-                          onPressed: () => _showAccountDetails(context, acc.serverId),
+                          onPressed: () => _showAccountDetails(acc.serverId),
                           tooltip: 'Details',
                         ),
                         IconButton(
@@ -442,29 +442,23 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   void _showRiskSettings(Account acc) {
     showDialog(
       context: context,
-      // Mt5RiskDialog still consumes a Map<String, dynamic>; convert at boundary.
-      // It will be migrated to take Account directly in a later refactor.
-      builder: (context) => Mt5RiskDialog(account: {
-        'id': acc.serverId.toString(),
-        'accountNumber': acc.loginNumber,
-        'accountName': acc.accountName,
-      }),
+      builder: (context) => Mt5RiskDialog(account: acc),
     );
   }
 
-  void _showAccountDetails(BuildContext context, int userId) async {
+  Future<void> _showAccountDetails(int userId) async {
     final repo = context.read<TradingRepository>();
     final details = await repo.getAccountDetails(userId);
-    
+
     if (!mounted) return;
 
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
+      builder: (sheetContext) => Container(
         padding: const EdgeInsets.all(32),
         decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
+          color: Theme.of(sheetContext).cardColor,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
         ),
         child: Column(
@@ -482,7 +476,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   Text(e.value, style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
-            )).toList(),
+            )),
             const SizedBox(height: 32),
           ],
         ),
@@ -492,23 +486,33 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
   void _showAccountForm(BuildContext context, {Account? account}) {
     final isEditing = account != null;
-    final accountNameController = TextEditingController(text: isEditing ? account.accountName : '');
-    final accountNumberController = TextEditingController(text: isEditing ? account.loginNumber : '');
-    final passwordController = TextEditingController();
-    final serverController = TextEditingController();
+
+    // Track every controller we create so we can dispose them when the
+    // dialog closes. Without this, each Add/Edit reopen leaks ~12 controllers.
+    final controllers = <TextEditingController>[];
+    TextEditingController makeController([String text = '']) {
+      final c = TextEditingController(text: text);
+      controllers.add(c);
+      return c;
+    }
+
+    final accountNameController = makeController(isEditing ? account.accountName : '');
+    final accountNumberController = makeController(isEditing ? account.loginNumber : '');
+    final passwordController = makeController();
+    final serverController = makeController();
 
     // Additional controllers for other platforms
-    final clientIdController = TextEditingController();
-    final clientSecretController = TextEditingController();
-    final refreshTokenController = TextEditingController();
-    final expireInController = TextEditingController();
-    final emailController = TextEditingController();
-    final userNameController = TextEditingController();
-    final brokerIdController = TextEditingController();
+    final clientIdController = makeController();
+    final clientSecretController = makeController();
+    final refreshTokenController = makeController();
+    final expireInController = makeController();
+    final emailController = makeController();
+    final userNameController = makeController();
+    final brokerIdController = makeController();
 
     String platformType = isEditing ? account.platform.wireValue : 'MT4';
     bool isMaster = isEditing ? account.isMaster : true;
-    final masterIdController = TextEditingController();
+    final masterIdController = makeController();
     bool isSubmitting = false;
 
     final platforms = ['MT4', 'MT5', 'cTrader', 'DxTrade', 'TradeLocker', 'MatchTrade'];
@@ -593,19 +597,30 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   children: [
                     const Text('Account Type: ', style: TextStyle(fontWeight: FontWeight.w500)),
                     const Spacer(),
+                    // Account type is locked in edit mode: the trading API
+                    // exposes update_Master_* and update_slave_* as separate
+                    // endpoints with no convert path. To switch type, delete
+                    // and re-register as the other type.
                     ChoiceChip(
                       label: const Text('Master'),
                       selected: isMaster,
-                      onSelected: (val) => setDialogState(() => isMaster = true),
+                      onSelected: isEditing ? null : (val) => setDialogState(() => isMaster = true),
                     ),
                     const SizedBox(width: 8),
                     ChoiceChip(
                       label: const Text('Slave'),
                       selected: !isMaster,
-                      onSelected: (val) => setDialogState(() => isMaster = false),
+                      onSelected: isEditing ? null : (val) => setDialogState(() => isMaster = false),
                     ),
                   ],
                 ),
+                if (isEditing) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Type cannot be changed. To switch, delete this account and re-register as the other type.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic),
+                  ),
+                ],
                 if (!isMaster) ...[
                   const SizedBox(height: 16),
                   TextField(
@@ -660,7 +675,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     );
 
                 if (context.mounted) {
-                  setDialogState(() => isSubmitting = false);
+                  // Don't setDialogState(false) here — we're about to pop,
+                  // and a rebuild scheduled after pop runs against unmounted
+                  // widgets (and post-pop disposed controllers).
                   final message = result['message'];
                   final isSuccess = result['success'] == true;
                   final apiId = result['id'];
@@ -707,14 +724,24 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 backgroundColor: const Color(0xFF6366F1),
                 foregroundColor: Colors.white,
               ),
-              child: isSubmitting 
+              child: isSubmitting
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : Text(isEditing ? 'Update' : 'Submit'),
             ),
           ],
         ),
       ),
-    );
+    ).whenComplete(() {
+      // Defer disposal one frame: any rebuild scheduled by the submit
+      // handler before the dialog pop must complete against live
+      // controllers. Without this, you can hit "TextEditingController
+      // was used after being disposed" on the failure path.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final c in controllers) {
+          c.dispose();
+        }
+      });
+    });
   }
 
   void _showDeleteConfirmation(BuildContext context, Account account) {

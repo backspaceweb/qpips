@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../../domain/account.dart';
 import '../../../../repositories/trading_repository.dart';
 import '../../../../core/api/generated/api.swagger.dart';
 
 class Mt5RiskDialog extends StatefulWidget {
-  final Map<String, dynamic> account;
+  final Account account;
 
   const Mt5RiskDialog({super.key, required this.account});
 
@@ -34,7 +35,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
 
   Future<void> _loadSettings() async {
     final repo = context.read<TradingRepository>();
-    final settings = await repo.getMT5RiskSettings(int.parse(widget.account['id']));
+    final settings = await repo.getMT5RiskSettings(widget.account.serverId);
 
     if (mounted) {
       setState(() {
@@ -63,7 +64,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
     final repo = context.read<TradingRepository>();
     
     final success = await repo.updateMT5RiskSettings(
-      userId: int.parse(widget.account['id']),
+      userId: widget.account.serverId,
       riskType: _riskType,
       multiplier: _multiplier,
       copySLTP: _copySLTP,
@@ -115,7 +116,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Text('Account: ${widget.account['accountNumber']} (${widget.account['accountName']})', 
+                    Text('Account: ${widget.account.loginNumber} (${widget.account.accountName})',
                          style: const TextStyle(color: Colors.grey)),
                     const Divider(height: 40),
                     
@@ -216,7 +217,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.withOpacity(0.3)),
+            border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<int>(

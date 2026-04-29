@@ -423,43 +423,6 @@ class TradingRepository {
     return result;
   }
 
-  Future<List<Map<String, dynamic>>> fetchUserAccounts(List<int> userIds, {Map<String, dynamic>? metadata}) async {
-    try {
-      if (userIds.isEmpty) return [];
-      
-      final response = await _api.apiV1GetStatusbyIDGet(userId: userIds);
-      if (response.isSuccessful && response.body != null) {
-        return response.body!.map((status) {
-          final id = status.userId.toString();
-          var m = metadata?[id];
-
-          // --- DEEP BRIDGE FIX ---
-          if (m == null && metadata != null) {
-            try {
-              m = metadata[id] ?? metadata.values.firstWhere(
-                (entry) => entry['accountNumber']?.toString() == id && id.isNotEmpty,
-                orElse: () => null,
-              );
-            } catch (e) {}
-          }
-          // ------------------
-          
-          return {
-            'id': id,
-            'accountName': m?['accountName'] ?? 'Slave',
-            'accountNumber': m?['accountNumber'] ?? id,
-            'accountType': m?['accountType'] ?? (id.startsWith('5') ? 'Slave' : 'Master'),
-            'platform': m?['platform'] ?? (id.startsWith('5') ? 'MT5' : 'MT4'),
-            'status': status.status ?? 'Offline',
-          };
-        }).toList();
-      }
-      return [];
-    } catch (e) {
-      return [];
-    }
-  }
-
   // Auth note: ApiKeyInterceptor injects X-API-KEY header on every request
   // through `_api.client`. Most endpoints accept header-only auth.
   //
