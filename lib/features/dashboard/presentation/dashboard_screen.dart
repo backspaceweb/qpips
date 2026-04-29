@@ -455,6 +455,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      // Override the Material 3 default (maxWidth: 640) so the trade
+      // tables breathe on wide desktop displays.
+      constraints: const BoxConstraints(maxWidth: 960),
       builder: (sheetContext) => AccountDetailsSheet(account: account),
     );
   }

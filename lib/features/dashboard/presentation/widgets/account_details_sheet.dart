@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../../../domain/account.dart';
 import '../../../../domain/trade_order.dart';
 import '../../../../repositories/trading_repository.dart';
+import 'edit_sltp_dialog.dart';
 
 /// Bottom sheet showing live order data for a single account.
 ///
@@ -55,66 +56,65 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final screenH = MediaQuery.of(context).size.height;
 
-    return DraggableScrollableSheet(
-      initialChildSize: 0.75,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (sheetContext, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: Theme.of(sheetContext).cardColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-          ),
-          child: Column(
-            children: [
-              // Drag handle
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(top: 12, bottom: 4),
-                decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildHeader(isDark),
-                      const SizedBox(height: 24),
-                      _buildSectionHeader('Open Orders', _open.length),
-                      const SizedBox(height: 12),
-                      _loading
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
-                              child: Center(child: CircularProgressIndicator()),
-                            )
-                          : _open.isEmpty
-                              ? _buildEmpty('No open orders.')
-                              : _buildOrdersTable(_open, isOpenView: true, isDark: isDark),
-                      const SizedBox(height: 32),
-                      _buildSectionHeader('Recent History (last 7 days)', _history.length),
-                      const SizedBox(height: 12),
-                      _loading
-                          ? const SizedBox.shrink()
-                          : _history.isEmpty
-                              ? _buildEmpty('No closed trades in this period.')
-                              : _buildOrdersTable(_history, isOpenView: false, isDark: isDark),
-                      const SizedBox(height: 32),
-                    ],
+    return DefaultTabController(
+      length: 2,
+      child: Container(
+        height: screenH * 0.86,
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          children: [
+            _buildDragHandle(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 4, 16, 0),
+              child: _buildHeader(isDark),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: _buildStatsStrip(isDark),
+            ),
+            const SizedBox(height: 20),
+            _buildTabBar(isDark),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _buildTabContent(
+                    isOpenView: true,
+                    orders: _open,
+                    isDark: isDark,
+                    emptyText: 'No open orders right now.',
+                    emptyIcon: Icons.trending_flat,
                   ),
-                ),
+                  _buildTabContent(
+                    isOpenView: false,
+                    orders: _history,
+                    isDark: isDark,
+                    emptyText: 'No closed trades in the last 7 days.',
+                    emptyIcon: Icons.history_toggle_off,
+                  ),
+                ],
               ),
-            ],
-          ),
-        );
-      },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDragHandle() {
+    return Container(
+      width: 44,
+      height: 4,
+      margin: const EdgeInsets.only(top: 10, bottom: 6),
+      decoration: BoxDecoration(
+        color: Colors.grey.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(2),
+      ),
     );
   }
 
@@ -124,14 +124,26 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: Text(
-                acc.accountName.isEmpty ? 'Account ${acc.serverId}' : acc.accountName,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    acc.accountName.isEmpty ? 'Account ${acc.serverId}' : acc.accountName,
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, height: 1.1),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Login ${acc.loginNumber} · Server ID ${acc.serverId}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
               ),
             ),
+            const SizedBox(width: 8),
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: _loading
@@ -145,18 +157,17 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
             IconButton(
               icon: const Icon(Icons.close),
               onPressed: () => Navigator.of(context).pop(),
+              tooltip: 'Close',
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 10),
         Wrap(
           spacing: 8,
-          runSpacing: 4,
+          runSpacing: 6,
           children: [
-            _chip('Login: ${acc.loginNumber}', Colors.grey),
             _chip(acc.accountType.wireValue, acc.isMaster ? Colors.purple : Colors.teal),
             _chip(acc.platform.wireValue, acc.platform == Platform.mt5 ? Colors.blue : Colors.orange),
-            _chip('Server ID: ${acc.serverId}', Colors.grey),
           ],
         ),
       ],
@@ -167,34 +178,119 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
     );
   }
 
-  Widget _buildSectionHeader(String label, int count) {
+  /// Top metric strip: open count, open P&L, history count, history net P&L.
+  Widget _buildStatsStrip(bool isDark) {
+    final openPnl = _open.fold<double>(0, (s, o) => s + o.profit);
+    final histPnl = _history.fold<double>(0, (s, o) => s + o.profit + o.commission + o.swap);
+
     return Row(
       children: [
-        Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text('$count', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-        ),
+        Expanded(child: _statCard('Open Trades', _loading ? '—' : '${_open.length}', isDark)),
+        const SizedBox(width: 12),
+        Expanded(child: _statCard('Open P&L', _loading ? '—' : _fmtMoney(openPnl), isDark, valueColor: _pnlColor(openPnl))),
+        const SizedBox(width: 12),
+        Expanded(child: _statCard('History (7d)', _loading ? '—' : '${_history.length}', isDark)),
+        const SizedBox(width: 12),
+        Expanded(child: _statCard('Net P&L (7d)', _loading ? '—' : _fmtMoney(histPnl), isDark, valueColor: _pnlColor(histPnl))),
       ],
     );
   }
 
-  Widget _buildEmpty(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Center(child: Text(text, style: const TextStyle(color: Colors.grey))),
+  Color? _pnlColor(double v) =>
+      v > 0 ? Colors.green : v < 0 ? Colors.redAccent : null;
+
+  Widget _statCard(String label, String value, bool isDark, {Color? valueColor}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.grey.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabBar(bool isDark) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06),
+          ),
+        ),
+      ),
+      child: TabBar(
+        labelColor: const Color(0xFF6366F1),
+        unselectedLabelColor: Colors.grey,
+        indicatorColor: const Color(0xFF6366F1),
+        indicatorWeight: 2.5,
+        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+        tabs: [
+          Tab(text: _loading ? 'Open Orders' : 'Open Orders (${_open.length})'),
+          Tab(text: _loading ? 'History (7d)' : 'History (${_history.length})'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabContent({
+    required bool isOpenView,
+    required List<TradeOrder> orders,
+    required bool isDark,
+    required String emptyText,
+    required IconData emptyIcon,
+  }) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (orders.isEmpty) {
+      return _buildEmpty(emptyText, emptyIcon);
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      child: _buildOrdersTable(orders, isOpenView: isOpenView, isDark: isDark),
+    );
+  }
+
+  Widget _buildEmpty(String text, IconData icon) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 40, color: Colors.grey.withValues(alpha: 0.5)),
+          const SizedBox(height: 12),
+          Text(
+            text,
+            style: const TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+        ],
+      ),
     );
   }
 
@@ -217,6 +313,7 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
           const DataColumn(label: Text('TP'), numeric: true),
           const DataColumn(label: Text('Profit'), numeric: true),
           const DataColumn(label: Text('Time')),
+          if (isOpenView) const DataColumn(label: Text('Actions')),
         ],
         rows: orders.map((o) => DataRow(cells: [
           DataCell(Text(o.ticket.toString(), style: const TextStyle(fontFamily: 'monospace'))),
@@ -239,9 +336,101 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
             ),
           )),
           DataCell(Text(_fmtTime(isOpenView ? o.openTime : o.lastUpdateTime))),
+          if (isOpenView)
+            DataCell(Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF6366F1)),
+                  onPressed: () => _editOrder(o),
+                  tooltip: 'Edit SL/TP',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18, color: Colors.redAccent),
+                  onPressed: () => _confirmCloseOrder(o),
+                  tooltip: 'Close order',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ],
+            )),
         ])).toList(),
       ),
     );
+  }
+
+  Future<void> _editOrder(TradeOrder order) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => EditSlTpDialog(account: widget.account, order: order),
+    );
+    if (ok == true && mounted) {
+      _reloadOrders();
+    }
+  }
+
+  Future<void> _confirmCloseOrder(TradeOrder order) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Close order?'),
+        content: Text(
+          'Close order #${order.ticket} '
+          '(${order.orderType} ${_fmtLots(order.lots)} ${order.symbol}) '
+          'at the current market price?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final repo = context.read<TradingRepository>();
+    final ok = await repo.closeOrder(account: widget.account, ticket: order.ticket);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Order #${order.ticket} closed'
+            : 'Failed to close order #${order.ticket}'),
+      ),
+    );
+    if (ok) _reloadOrders();
+  }
+
+  Future<void> _reloadOrders() async {
+    final repo = context.read<TradingRepository>();
+    final now = DateTime.now();
+    final from = now.subtract(const Duration(days: 7));
+    final results = await Future.wait([
+      repo.getOpenOrders(account: widget.account),
+      repo.getOrderHistory(
+        account: widget.account,
+        from: from,
+        to: now,
+        tradesOnly: true,
+      ),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _open = results[0];
+      _history = results[1];
+    });
   }
 
   Widget _sideChip(TradeOrder o) {

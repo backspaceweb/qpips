@@ -217,7 +217,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
       child: Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
-          width: 540,
+          width: 810,
           constraints: const BoxConstraints(maxHeight: 720),
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF1E293B) : Colors.white,

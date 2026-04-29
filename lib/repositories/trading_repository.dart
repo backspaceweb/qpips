@@ -412,6 +412,97 @@ class TradingRepository {
     }
   }
 
+  // --- B3.1: live-trading writes — modify SL/TP, close order ---
+  //
+  // accountStatus enum: value_0 = master/source, value_1 = slave/follow.
+  // We reference the enum members directly rather than via .values[idx]
+  // because the swagger-generated enums put a `swaggerGeneratedUnknown`
+  // sentinel at index 0, which would silently corrupt index-based access.
+
+  /// Update SL / TP on an existing open order. Pass 0 to clear a level.
+  Future<bool> modifyOrder({
+    required Account account,
+    required int ticket,
+    required num stopLoss,
+    required num takeProfit,
+  }) async {
+    try {
+      Response response;
+      switch (account.platform) {
+        case Platform.mt5:
+          response = await _api.apiV1ModifyOrderMt5Post(
+            ticket: ticket,
+            userId: account.serverId,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            accountStatus: account.isMaster
+                ? ApiV1ModifyOrderMt5PostAccountStatus.value_0
+                : ApiV1ModifyOrderMt5PostAccountStatus.value_1,
+          );
+          break;
+        case Platform.mt4:
+          response = await _api.apiV1ModifyOrderMt4Post(
+            ticket: ticket,
+            userId: account.serverId,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            accountStatus: account.isMaster
+                ? ApiV1ModifyOrderMt4PostAccountStatus.value_0
+                : ApiV1ModifyOrderMt4PostAccountStatus.value_1,
+          );
+          break;
+        default:
+          if (kDebugMode) {
+            print('modifyOrder: ${account.platform.wireValue} not yet supported');
+          }
+          return false;
+      }
+      return response.isSuccessful;
+    } catch (e) {
+      if (kDebugMode) print('modifyOrder error: $e');
+      return false;
+    }
+  }
+
+  /// Fully close an open order at the current market price.
+  Future<bool> closeOrder({
+    required Account account,
+    required int ticket,
+  }) async {
+    try {
+      Response response;
+      switch (account.platform) {
+        case Platform.mt5:
+          response = await _api.apiV1CloseOrderForMT5Post(
+            userId: account.serverId,
+            ticket: ticket,
+            accountStatus: account.isMaster
+                ? ApiV1CloseOrderForMT5PostAccountStatus.value_0
+                : ApiV1CloseOrderForMT5PostAccountStatus.value_1,
+          );
+          break;
+        case Platform.mt4:
+          response = await _api.apiV1CloseOrderMt4Post(
+            userId: account.serverId,
+            ticket: ticket,
+            accountStatus: account.isMaster
+                ? ApiV1CloseOrderMt4PostAccountStatus.value_0
+                : ApiV1CloseOrderMt4PostAccountStatus.value_1,
+          );
+          break;
+        default:
+          if (kDebugMode) {
+            print('closeOrder: ${account.platform.wireValue} not yet supported');
+          }
+          return false;
+      }
+      return response.isSuccessful;
+    } catch (e) {
+      if (kDebugMode) print('closeOrder error: $e');
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>> registerTradingAccount({
     required int userId,
     required String platformType,
