@@ -1,20 +1,40 @@
-import '../core/api/generated/api.swagger.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthRepository {
-  // ignore: unused_field
-  final Api _api;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
-  AuthRepository(this._api);
-
-  // TODO(auth): Replace with Supabase Auth `signInWithPassword` before any
-  // production deployment. This is a permissive mock retained for one more
-  // dev cycle while the Supabase Auth flow is built out.
-  // See: https://supabase.com/docs/reference/dart/auth-signinwithpassword
   Future<String> login(String email, String password) async {
-    await Future.delayed(const Duration(milliseconds: 500));
     if (email.isEmpty || password.isEmpty) {
-      return "Email and password are required";
+      return 'Email and password are required';
     }
-    return "Login successful";
+    try {
+      final response = await _supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+      if (response.session == null) {
+        return 'Login failed: no session returned';
+      }
+      return 'Login successful';
+    } on AuthException catch (e) {
+      final msg = e.message.toLowerCase();
+      if (msg.contains('invalid login credentials') ||
+          msg.contains('invalid email or password')) {
+        return 'Invalid email or password';
+      }
+      if (msg.contains('email not confirmed')) {
+        return 'Email not confirmed. Open this user in Supabase Dashboard → Authentication → Users and toggle "Auto Confirm" on.';
+      }
+      return 'Login failed: ${e.message}';
+    } catch (e) {
+      return 'Login failed: $e';
+    }
   }
+
+  Future<void> signOut() async {
+    await _supabase.auth.signOut();
+  }
+
+  Session? get currentSession => _supabase.auth.currentSession;
+  bool get isLoggedIn => currentSession != null;
 }

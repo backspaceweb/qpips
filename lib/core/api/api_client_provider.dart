@@ -26,8 +26,8 @@ class ApiClientProvider {
       update: (_, api, __) => TradingRepository(api),
     ),
 
-    ProxyProvider<Api, AuthRepository>(
-      update: (_, api, __) => AuthRepository(api),
+    Provider<AuthRepository>(
+      create: (_) => AuthRepository(),
     ),
   ];
 }

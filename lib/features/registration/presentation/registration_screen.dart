@@ -58,13 +58,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       setState(() => _isLoading = false);
       String snackMessage = message;
       if (isSuccess) {
-        final prefs = await SharedPreferences.getInstance();
         if (_isLoginMode) {
-          await prefs.setBool('isLoggedIn', true);
+          // Supabase Auth manages session persistence; no SharedPreferences flag needed.
           if (mounted) {
             Navigator.of(context).pushReplacementNamed('/dashboard');
           }
         } else if (userId != null) {
+          final prefs = await SharedPreferences.getInstance();
           // Use API ID if provided, fallback to userId
           final storedId = apiId ?? userId.toString();
 

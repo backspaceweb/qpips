@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../repositories/trading_repository.dart';
+import '../../../repositories/auth_repository.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -215,8 +216,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           _buildNavItem(Icons.settings_outlined, 'Settings', false, primary),
           const Spacer(),
           _buildNavItem(Icons.logout, 'Logout', false, Colors.redAccent, onTap: () async {
-             final prefs = await SharedPreferences.getInstance();
-             await prefs.setBool('isLoggedIn', false);
+             await context.read<AuthRepository>().signOut();
              if (mounted) {
                Navigator.of(context).pushReplacementNamed('/registration');
              }
