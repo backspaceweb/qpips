@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/api/generated/api.swagger.dart';
 import '../domain/account.dart';
+import '../domain/trade_order.dart';
 
 class TradingRepository {
   final Api _api;
@@ -704,14 +705,152 @@ class TradingRepository {
     };
   }
 
-  Future<Map<String, String>> getAccountDetails(int userId) async {
-    return {
-      'Account Number': userId.toString(),
-      'Broker': 'Broker Name',
-      'Leverage': '1:500',
-      'Currency': 'USD',
-    };
+  // --- Phase B read paths: open orders, history, symbols ---
+  //
+  // The Chopper-generated methods for these endpoints declare return type
+  // `Response<StringResponseDto>`, but the live server returns a raw JSON
+  // array (the OpenAPI spec is wrong). So we use raw `_api.client.get/post`
+  // and parse the body ourselves.
+
+  /// Fetch all currently-open orders/positions for [account].
+  /// Returns an empty list if the platform isn't supported or the call fails.
+  Future<List<TradeOrder>> getOpenOrders({required Account account}) async {
+    switch (account.platform) {
+      case Platform.mt5:
+        return _fetchOrders('/api/v1/get_orders_mt5', account);
+      case Platform.mt4:
+        return _fetchOrders('/api/v1/get_orders_mt4', account);
+      default:
+        // Other platforms ship in later sub-PRs (cTrader, DxTrade, ...).
+        return [];
+    }
   }
+
+  /// Fetch closed-order history for [account] within `[from, to]`.
+  /// History responses include non-trade Balance entries — pass
+  /// `tradesOnly: true` to filter them out.
+  Future<List<TradeOrder>> getOrderHistory({
+    required Account account,
+    required DateTime from,
+    required DateTime to,
+    bool tradesOnly = false,
+  }) async {
+    final fromStr = _ymd(from);
+    final toStr = _ymd(to);
+    List<TradeOrder> orders;
+    switch (account.platform) {
+      case Platform.mt5:
+        orders = await _fetchOrderHistory('/api/v1/get_order_history_mt5', account, fromStr, toStr);
+        break;
+      case Platform.mt4:
+        orders = await _fetchOrderHistory('/api/v1/get_order_history_mt4', account, fromStr, toStr);
+        break;
+      default:
+        return [];
+    }
+    if (tradesOnly) {
+      orders = orders.where((o) => !o.isBalanceEntry).toList();
+    }
+    return orders;
+  }
+
+  /// Full list of tradable symbols available to [account] on its broker.
+  /// Response can be ~5KB+ so callers should cache.
+  Future<List<String>> getAllSymbols({required Account account}) async {
+    final status = account.isMaster ? 0 : 1;
+    Uri uri;
+    switch (account.platform) {
+      case Platform.mt5:
+        uri = Uri.parse('/api/v1/getAllSymbol/MT5/${account.serverId}?accountStatus=$status');
+        break;
+      case Platform.mt4:
+        uri = Uri.parse('/api/v1/getAllSymbol/MT4/${account.serverId}?accountStatus=$status');
+        break;
+      default:
+        return [];
+    }
+    try {
+      final response = await _api.client.get(uri);
+      if (response.isSuccessful && response.body is List) {
+        return (response.body as List).map((e) => e.toString()).toList();
+      }
+      return [];
+    } catch (e) {
+      if (kDebugMode) print('getAllSymbols error: $e');
+      return [];
+    }
+  }
+
+  // --- Internal helpers for the read endpoints ---
+
+  Future<List<TradeOrder>> _fetchOrders(String path, Account account) async {
+    final status = account.isMaster ? 0 : 1;
+    try {
+      final response = await _api.client.post(
+        Uri.parse(path),
+        parameters: {'accountStatus': status, 'userId': account.serverId},
+      );
+      return _parseOrderListBody(response.body);
+    } catch (e) {
+      if (kDebugMode) print('getOpenOrders error ($path): $e');
+      return [];
+    }
+  }
+
+  Future<List<TradeOrder>> _fetchOrderHistory(
+    String path,
+    Account account,
+    String from,
+    String to,
+  ) async {
+    final status = account.isMaster ? 0 : 1;
+    try {
+      final response = await _api.client.post(
+        Uri.parse(path),
+        parameters: {
+          'accountStatus': status,
+          'id': account.serverId,
+          'from': from,
+          'to': to,
+        },
+      );
+      return _parseOrderListBody(response.body);
+    } catch (e) {
+      if (kDebugMode) print('getOrderHistory error ($path): $e');
+      return [];
+    }
+  }
+
+  /// The server can return either a raw JSON array or a JSON string
+  /// containing an array (sometimes with a leading error like "Master
+  /// account not found"). Be tolerant.
+  List<TradeOrder> _parseOrderListBody(dynamic body) {
+    if (body == null) return [];
+    if (body is List) {
+      return body
+          .whereType<Map>()
+          .map((m) => TradeOrder.fromMap(Map<String, dynamic>.from(m)))
+          .toList();
+    }
+    if (body is String) {
+      final s = body.trim();
+      if (!s.startsWith('[')) return [];
+      try {
+        final decoded = jsonDecode(s);
+        if (decoded is List) {
+          return decoded
+              .whereType<Map>()
+              .map((m) => TradeOrder.fromMap(Map<String, dynamic>.from(m)))
+              .toList();
+        }
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  /// Format DateTime as `yyyy-MM-dd` for the history endpoint.
+  String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   Future<Map<String, dynamic>> updateTradingAccount({
     required int userId,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'widgets/price_ticker.dart';
 import 'widgets/mt5_risk_dialog.dart';
+import 'widgets/account_details_sheet.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -387,7 +388,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                           ),
                         IconButton(
                           icon: const Icon(Icons.info_outline, size: 20),
-                          onPressed: () => _showAccountDetails(acc.serverId),
+                          onPressed: () => _showAccountDetails(acc),
                           tooltip: 'Details',
                         ),
                         IconButton(
@@ -449,41 +450,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
-  Future<void> _showAccountDetails(int userId) async {
-    final repo = context.read<TradingRepository>();
-    final details = await repo.getAccountDetails(userId);
-
-    if (!mounted) return;
-
+  void _showAccountDetails(Account account) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => Container(
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: Theme.of(sheetContext).cardColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Account Details: $userId', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            ...details.entries.map((e) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(e.key, style: const TextStyle(color: Colors.grey)),
-                  Text(e.value, style: const TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-            )),
-            const SizedBox(height: 32),
-          ],
-        ),
-      ),
+      isScrollControlled: true,
+      builder: (sheetContext) => AccountDetailsSheet(account: account),
     );
   }
 
