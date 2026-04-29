@@ -19,7 +19,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   bool _isLoading = true;
   Map<String, dynamic> _metrics = {
     'totalAccounts': '0',
-    'limit': '--',
+    'accountLimit': '--',
     'activeTrades': 'No active trades',
     'latency': 'Checking...',
   };
@@ -289,7 +289,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       children: [
         _buildMetricCard('Total Accounts', _metrics['totalAccounts']?.toString() ?? '0', Icons.account_balance, Colors.blue, isDark),
         const SizedBox(width: 24),
-        _buildMetricCard('Account Limit', _metrics['limit']?.toString() ?? '--', Icons.lock_clock, Colors.orange, isDark),
+        _buildMetricCard('Account Limit', _metrics['accountLimit']?.toString() ?? '--', Icons.lock_clock, Colors.orange, isDark),
         const SizedBox(width: 24),
         _buildMetricCard('Active Trades', _metrics['activeTrades']?.toString() ?? 'No active trades', Icons.trending_up, Colors.green, isDark),
       ],

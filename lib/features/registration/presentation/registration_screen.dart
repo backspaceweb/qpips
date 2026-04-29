@@ -56,20 +56,24 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
     if (mounted) {
       setState(() => _isLoading = false);
+      String snackMessage = message;
       if (isSuccess) {
         final prefs = await SharedPreferences.getInstance();
         if (_isLoginMode) {
           await prefs.setBool('isLoggedIn', true);
+          if (mounted) {
+            Navigator.of(context).pushReplacementNamed('/dashboard');
+          }
         } else if (userId != null) {
           // Use API ID if provided, fallback to userId
           final storedId = apiId ?? userId.toString();
-          
+
           final List<String> savedIds = prefs.getStringList('registeredUserIds') ?? [];
           if (!savedIds.contains(storedId)) {
             savedIds.add(storedId);
             await prefs.setStringList('registeredUserIds', savedIds);
           }
-          
+
           final String? metadataJson = prefs.getString('accountMetadata');
           Map<String, dynamic> metadata = {};
           if (metadataJson != null) {
@@ -78,21 +82,36 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
           metadata[storedId] = {
             'id': storedId,
             'platform': _platformType,
-            'accountType': 'Master', 
+            'accountType': 'Master',
             'accountNumber': userId.toString(),
             'accountName': _accountNameController.text.isNotEmpty ? _accountNameController.text : userId.toString(),
           };
           await prefs.setString('accountMetadata', jsonEncode(metadata));
+
+          // Registration creates a trading account on the server, but does NOT
+          // authenticate the user. Drop them back to the login form so /dashboard
+          // is only reachable through a successful login.
+          if (mounted) {
+            setState(() {
+              _isLoginMode = true;
+              _passwordController.clear();
+              _userIdController.clear();
+              _serverController.clear();
+              _accountNameController.clear();
+            });
+          }
+          snackMessage = 'Account registered. Please log in to continue.';
         }
-        Navigator.of(context).pushReplacementNamed('/dashboard');
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: isSuccess ? Colors.green : Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(snackMessage),
+            backgroundColor: isSuccess ? Colors.green : Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -139,7 +158,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _isLoginMode ? 'Admin Login' : 'Register your trading account',
+                    'Super Admin Login',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 16,
@@ -222,11 +241,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
                   ),
-                  const SizedBox(height: 16),
-                  TextButton(
-                    onPressed: () => setState(() => _isLoginMode = !_isLoginMode),
-                    child: Text(_isLoginMode ? "Need to register? Sign Up" : "Admin? Log In"),
-                  ),
+                  // Public Sign-Up toggle removed: this screen is super-admin
+                  // login only. Admin/account onboarding will live inside the
+                  // dashboard once the in-app admin flow is built.
                 ],
               ),
             ),

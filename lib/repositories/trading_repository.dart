@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:chopper/chopper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/api/generated/api.swagger.dart';
 
@@ -21,7 +21,7 @@ class TradingRepository {
     String? masterId,
   }) async {
     try {
-      print('SUPABASE_SAVE_START: Saving $accountName ($loginNumber)...');
+      if (kDebugMode) print('SUPABASE_SAVE_START: Saving $accountName ($loginNumber)...');
       await _supabase.from('trading_accounts').upsert({
         'account_name': accountName,
         'login_number': loginNumber,
@@ -30,12 +30,12 @@ class TradingRepository {
         'server_id': serverId,
         'master_id': masterId,
       }, onConflict: 'login_number');
-      print('SUPABASE_SAVE_SUCCESS: Account $accountName is now in the cloud.');
+      if (kDebugMode) print('SUPABASE_SAVE_SUCCESS: Account $accountName is now in the cloud.');
     } catch (e) {
-      print('SUPABASE_SAVE_CRITICAL_ERROR: $e');
+      if (kDebugMode) print('SUPABASE_SAVE_CRITICAL_ERROR: $e');
       // Fallback: try simple insert if upsert fails
       try {
-        print('SUPABASE_SAVE_FALLBACK: Attempting simple insert...');
+        if (kDebugMode) print('SUPABASE_SAVE_FALLBACK: Attempting simple insert...');
         await _supabase.from('trading_accounts').insert({
           'account_name': accountName,
           'login_number': loginNumber,
@@ -44,21 +44,21 @@ class TradingRepository {
           'server_id': serverId,
           'master_id': masterId,
         });
-        print('SUPABASE_SAVE_FALLBACK_SUCCESS: Saved via insert.');
+        if (kDebugMode) print('SUPABASE_SAVE_FALLBACK_SUCCESS: Saved via insert.');
       } catch (e2) {
-        print('SUPABASE_SAVE_TOTAL_FAILURE: $e2');
+        if (kDebugMode) print('SUPABASE_SAVE_TOTAL_FAILURE: $e2');
       }
     }
   }
 
   Future<List<Map<String, dynamic>>> fetchAccountsFromCloud() async {
     try {
-      print('Supabase: Fetching accounts from cloud...');
+      if (kDebugMode) print('Supabase: Fetching accounts from cloud...');
       final response = await _supabase.from('trading_accounts').select('*');
-      print('Supabase: Fetched ${response.length} accounts.');
+      if (kDebugMode) print('Supabase: Fetched ${response.length} accounts.');
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print('Supabase Error (fetch): $e');
+      if (kDebugMode) print('Supabase Error (fetch): $e');
       return [];
     }
   }
@@ -66,18 +66,18 @@ class TradingRepository {
   Future<void> deleteAccountFromCloud(String loginNumber) async {
     try {
       await _supabase.from('trading_accounts').delete().eq('login_number', loginNumber);
-      print('Cloud: Account $loginNumber deleted successfully.');
+      if (kDebugMode) print('Cloud: Account $loginNumber deleted successfully.');
     } catch (e) {
-      print('Cloud Error: Failed to delete account: $e');
+      if (kDebugMode) print('Cloud Error: Failed to delete account: $e');
     }
   }
 
   Future<void> updateServerIdInCloud(String loginNumber, String serverId) async {
     try {
       await _supabase.from('trading_accounts').update({'server_id': serverId}).eq('login_number', loginNumber);
-      print('Cloud: Linked Server ID $serverId to Login $loginNumber');
+      if (kDebugMode) print('Cloud: Linked Server ID $serverId to Login $loginNumber');
     } catch (e) {
-      print('Cloud Error: Failed to update Server ID: $e');
+      if (kDebugMode) print('Cloud Error: Failed to update Server ID: $e');
     }
   }
 
@@ -115,7 +115,7 @@ class TradingRepository {
       }
       return response.isSuccessful;
     } catch (e) {
-      print('Error toggling account activation: $e');
+      if (kDebugMode) print('Error toggling account activation: $e');
       return false;
     }
   }
@@ -124,13 +124,13 @@ class TradingRepository {
     try {
       final riskResponse = await _api.apiV1Mt5GetRiskGet(userId: userId);
       final stopsResponse = await _api.apiV1Mt5GetStopsLimitsGet(userId: userId);
-      
+
       return {
         'risk': riskResponse.isSuccessful ? riskResponse.body : null,
         'stops': stopsResponse.isSuccessful ? stopsResponse.body : null,
       };
     } catch (e) {
-      print('Error fetching MT5 risk settings: $e');
+      if (kDebugMode) print('Error fetching MT5 risk settings: $e');
       return {'risk': null, 'stops': null};
     }
   }
@@ -163,7 +163,7 @@ class TradingRepository {
 
       return riskResponse.isSuccessful && stopsResponse.isSuccessful;
     } catch (e) {
-      print('Error updating MT5 risk settings: $e');
+      if (kDebugMode) print('Error updating MT5 risk settings: $e');
       return false;
     }
   }
@@ -188,7 +188,7 @@ class TradingRepository {
     String? brokerId,
   }) async {
     try {
-      print('DEBUG: registerTradingAccount start: userId=$userId, platform=$platformType, isMaster=$isMaster');
+      if (kDebugMode) print('DEBUG: registerTradingAccount start: userId=$userId, platform=$platformType, isMaster=$isMaster');
       Response<StringResponseDto> response;
       final platform = platformType.toUpperCase();
 
@@ -330,9 +330,9 @@ class TradingRepository {
           return {'message': 'Unsupported platform: $platformType', 'success': false};
       }
 
-      print('DEBUG: registerTradingAccount response status: ${response.statusCode}');
+      if (kDebugMode) print('DEBUG: registerTradingAccount response status: ${response.statusCode}');
       if (response.isSuccessful) {
-        print('DEBUG: registerTradingAccount success: ${response.body?.message}');
+        if (kDebugMode) print('DEBUG: registerTradingAccount success: ${response.body?.message}');
         return {
           'message': response.body?.message ?? 'Registration successful',
           'id': response.body?.data?.toString(),
@@ -340,15 +340,17 @@ class TradingRepository {
         };
       } else {
         final error = response.error;
-        print('DEBUG: registerTradingAccount failure: $error');
+        if (kDebugMode) print('DEBUG: registerTradingAccount failure: $error');
         return {
           'message': 'Registration failed: ${error ?? response.base.reasonPhrase}',
           'success': false,
         };
       }
     } catch (e, stack) {
-      print('DEBUG: registerTradingAccount error: $e');
-      print('DEBUG: stack trace: $stack');
+      if (kDebugMode) {
+        print('DEBUG: registerTradingAccount error: $e');
+        print('DEBUG: stack trace: $stack');
+      }
       return {'message': 'An error occurred: $e', 'success': false};
     }
   }
@@ -387,12 +389,12 @@ class TradingRepository {
 
     if (result['success'] == true) {
       final String serverId = result['id']?.toString() ?? userId.toString();
-      
-      print('DEBUG: registerTradingAccount successful. ID assigned: $serverId');
-      
+
+      if (kDebugMode) print('DEBUG: registerTradingAccount successful. ID assigned: $serverId');
+
       // AUTO-SAVE TO SUPABASE WITH EXPLICIT ERROR CATCHING
       try {
-        print('DEBUG: Initiating Cloud Save for $accountName...');
+        if (kDebugMode) print('DEBUG: Initiating Cloud Save for $accountName...');
         await saveAccountToCloud(
           accountName: accountName,
           loginNumber: userId.toString(),
@@ -401,9 +403,9 @@ class TradingRepository {
           serverId: serverId,
           masterId: masterId?.toString(),
         );
-        print('DEBUG: Cloud Save process finished.');
+        if (kDebugMode) print('DEBUG: Cloud Save process finished.');
       } catch (cloudErr) {
-        print('DEBUG: CRITICAL CLOUD SAVE FAILURE: $cloudErr');
+        if (kDebugMode) print('DEBUG: CRITICAL CLOUD SAVE FAILURE: $cloudErr');
       }
 
       return {
@@ -457,31 +459,37 @@ class TradingRepository {
     }
   }
 
-  Future<Map<String, dynamic>?> getAPIInfo(String key) async {
+  // Auth note: ApiKeyInterceptor injects X-API-KEY header on every request
+  // through `_api.client`. Most endpoints accept header-only auth.
+  //
+  // EXCEPTION: /api/v1/getAPIInfo rejects header-only with HTTP 400
+  // ("The key field is required.") even though the OpenAPI spec advertises
+  // the header-only ApiKey scheme. This is a server-side bug — TODO(server):
+  // ask the API team to fix getAPIInfo to honor the documented auth scheme.
+  // Until then we send the key as a query param for this one endpoint and
+  // accept the URL-leak risk for this single call.
+  Future<Map<String, dynamic>?> getAPIInfo() async {
     try {
+      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
       final response = await _api.client.get(
         Uri.parse('/api/v1/getAPIInfo'),
-        parameters: {'key': key},
+        parameters: {'key': apiKey},
       );
       if (response.isSuccessful && response.body != null) {
         return response.body as Map<String, dynamic>;
       }
       return null;
     } catch (e) {
-      print('Error in getAPIInfo: $e');
+      if (kDebugMode) print('Error in getAPIInfo: $e');
       return null;
     }
   }
 
   Future<List<int>> getAccountIds(int userId) async {
     try {
-      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
       final response = await _api.client.get(
         Uri.parse('/api/v1/get_id'),
-        parameters: {
-          'userId': userId.toString(),
-          'key': apiKey,
-        },
+        parameters: {'userId': userId.toString()},
       );
       if (response.isSuccessful && response.body != null) {
         final dynamic body = response.body;
@@ -508,13 +516,9 @@ class TradingRepository {
 
   Future<Map<String, dynamic>> getAccountDetailsById(int userId) async {
     try {
-      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
       final response = await _api.client.get(
         Uri.parse('/api/v1/getbyid'),
-        parameters: {
-          'userId': userId.toString(),
-          'key': apiKey,
-        },
+        parameters: {'userId': userId.toString()},
       );
 
       if (response.isSuccessful && response.body != null) {
@@ -533,15 +537,11 @@ class TradingRepository {
 
   Future<List<int>> getStatus(int userId) async {
     try {
-      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
       final response = await _api.client.get(
         Uri.parse('/api/v1/getStatus'),
-        parameters: {
-          'userId': userId.toString(),
-          'key': apiKey,
-        },
+        parameters: {'userId': userId.toString()},
       );
-      
+
       if (response.isSuccessful && response.body != null) {
         final dynamic body = response.body;
         if (body is List) {
@@ -556,14 +556,9 @@ class TradingRepository {
 
   Future<List<UserStatusDto>> getStatusByIds(List<int> userIds) async {
     try {
-      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
-      
       final response = await _api.client.get(
         Uri.parse('/api/v1/getStatusbyID'),
-        parameters: {
-          'userId': userIds,
-          'key': apiKey,
-        },
+        parameters: {'userId': userIds},
       );
 
       if (response.isSuccessful && response.body != null) {
@@ -580,7 +575,7 @@ class TradingRepository {
       }
       return [];
     } catch (e) {
-      print('Error in getStatusByIds: $e');
+      if (kDebugMode) print('Error in getStatusByIds: $e');
       return [];
     }
   }
@@ -617,20 +612,18 @@ class TradingRepository {
       }
       return [];
     } catch (e) {
-      print('Error fetching slave IDs: $e');
+      if (kDebugMode) print('Error fetching slave IDs: $e');
       return [];
     }
   }
 
   Future<List<Map<String, dynamic>>> syncAccountsWithServer() async {
     try {
-      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
-      
       // 1. FETCH FROM CLOUD (Primary Source)
       final cloudAccounts = await fetchAccountsFromCloud();
-      
+
       // 2. FETCH ALL IDS FROM TRADING SERVER
-      final dataMap = await getAPIInfo(apiKey);
+      final dataMap = await getAPIInfo();
       final List<int> serverIds = (dataMap != null && dataMap['accounts'] is List)
           ? (dataMap['accounts'] as List).map((e) => int.tryParse(e.toString()) ?? 0).toList()
           : [];
@@ -657,7 +650,7 @@ class TradingRepository {
            if (newServerId != 0) {
              serverId = newServerId.toString();
              await updateServerIdInCloud(login, serverId);
-             print('DEBUG: Linked $login to new Server ID $serverId');
+             if (kDebugMode) print('DEBUG: Linked $login to new Server ID $serverId');
            }
         }
 
@@ -698,15 +691,17 @@ class TradingRepository {
         });
       }
 
-      print('\n--- [DASHBOARD TABLE DATA FROM CLOUD + SERVER] ---');
-      for (var acc in synchedAccounts) {
-        print('Row -> ID: ${acc['id']}, Name: ${acc['accountName']}, Login: ${acc['accountNumber']}, Platform: ${acc['platform']}, Type: ${acc['accountType']}');
+      if (kDebugMode) {
+        print('\n--- [DASHBOARD TABLE DATA FROM CLOUD + SERVER] ---');
+        for (var acc in synchedAccounts) {
+          print('Row -> ID: ${acc['id']}, Name: ${acc['accountName']}, Login: ${acc['accountNumber']}, Platform: ${acc['platform']}, Type: ${acc['accountType']}');
+        }
+        print('--------------------------------------------------\n');
       }
-      print('--------------------------------------------------\n');
 
       return synchedAccounts;
     } catch (e) {
-      print('Cloud Sync error: $e');
+      if (kDebugMode) print('Cloud Sync error: $e');
       return [];
     }
   }
@@ -715,15 +710,14 @@ class TradingRepository {
     int totalAccounts = 0;
     String limit = '--';
     try {
-      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
-      if (apiKey.isNotEmpty) {
-        final dataMap = await getAPIInfo(apiKey);
-        if (dataMap != null) {
-          totalAccounts = dataMap['usedAccountCount'] ?? 0;
-          limit = (dataMap['accountLimit'] ?? '--').toString();
-        }
+      final dataMap = await getAPIInfo();
+      if (dataMap != null) {
+        totalAccounts = dataMap['usedAccountCount'] ?? 0;
+        limit = (dataMap['accountLimit'] ?? '--').toString();
       }
-    } catch (e) {}
+    } catch (e) {
+      if (kDebugMode) print('getDashboardMetrics error: $e');
+    }
     return {
       'totalAccounts': totalAccounts,
       'accountLimit': limit,
@@ -899,57 +893,63 @@ class TradingRepository {
     String? loginNumber, // Added backup login number
   }) async {
     try {
-      print('API: Attempting to delete account $userId (isMaster: $isMaster)');
-      Response<BooleanResponseDto> response;
-      
-      // Attempt 1: Using the primary ID (Server ID)
-      if (isMaster) {
-        response = await _api.apiV1SourceUserIdDelete(userId: userId);
-      } else {
-        response = await _api.apiV1FollowUserIdDelete(userId: userId);
-      }
+      if (kDebugMode) print('API: Attempting to delete account $userId (isMaster: $isMaster)');
 
-      // Attempt 2: If primary ID fails (404), try using the Login Number
-      if (!response.isSuccessful && loginNumber != null) {
-        final backupId = int.tryParse(loginNumber) ?? 0;
-        if (backupId != 0 && backupId != userId) {
-           print('API: Primary delete failed, trying backup Login Number: $backupId');
-           if (isMaster) {
-             response = await _api.apiV1SourceUserIdDelete(userId: backupId);
-           } else {
-             response = await _api.apiV1FollowUserIdDelete(userId: backupId);
-           }
-        }
-      }
+      // Build the list of (id, role) attempts. We try both roles for each ID
+      // so a delete cannot get stuck just because the UI label was wrong
+      // (e.g. sync race or stale heuristic). First success wins.
+      final ids = <int>[userId];
+      final backupId = int.tryParse(loginNumber ?? '') ?? 0;
+      if (backupId != 0 && backupId != userId) ids.add(backupId);
+      final roles = <bool>[isMaster, !isMaster];
 
-      if (response.isSuccessful) {
-        final success = response.body?.success;
-        final message = response.body?.message?.toLowerCase() ?? '';
-        if (success == true || message.contains('success')) {
-          // SYNC SUCCESS: Now remove from Supabase
-          await deleteAccountFromCloud(loginNumber ?? userId.toString());
-          // Also try removing by server_id just in case
-          await _supabase.from('trading_accounts').delete().eq('server_id', userId.toString());
-          
-          return 'Account deleted successfully from Server and Cloud';
-        } else {
-          return 'Delete failed: ${response.body?.message ?? response.base.reasonPhrase}';
-        }
-      } else {
-        final errorBody = response.error;
-        String errorMessage = 'Delete failed';
-        if (errorBody is Map) {
-          errorMessage = errorBody['message'] ?? errorBody['status'] ?? errorMessage;
-        } else if (errorBody is String) {
-          try {
-            final Map parsed = jsonDecode(errorBody);
-            errorMessage = parsed['message'] ?? parsed['status'] ?? errorMessage;
-          } catch (e) {
-            errorMessage = errorBody;
+      Response<BooleanResponseDto>? lastResponse;
+      for (final id in ids) {
+        for (final asMaster in roles) {
+          final response = asMaster
+              ? await _api.apiV1SourceUserIdDelete(userId: id)
+              : await _api.apiV1FollowUserIdDelete(userId: id);
+          lastResponse = response;
+
+          if (response.isSuccessful) {
+            final success = response.body?.success;
+            final message = response.body?.message?.toLowerCase() ?? '';
+            if (success == true || message.contains('success')) {
+              if (kDebugMode) {
+                print('API: Delete succeeded with id=$id asMaster=$asMaster');
+              }
+              await deleteAccountFromCloud(loginNumber ?? userId.toString());
+              // Defensive: also drop any cloud row keyed by server_id
+              await _supabase
+                  .from('trading_accounts')
+                  .delete()
+                  .eq('server_id', userId.toString());
+              return 'Account deleted successfully from Server and Cloud';
+            }
+          }
+          if (kDebugMode) {
+            print('API: Delete attempt failed (id=$id asMaster=$asMaster, status=${response.statusCode})');
           }
         }
-        return '$errorMessage (Code: ${response.statusCode})';
       }
+
+      // All attempts exhausted: format the last failure for the user.
+      final r = lastResponse!;
+      final errorBody = r.error;
+      String errorMessage = 'Delete failed';
+      if (errorBody is Map) {
+        errorMessage = errorBody['message'] ?? errorBody['status'] ?? errorMessage;
+      } else if (errorBody is String) {
+        try {
+          final Map parsed = jsonDecode(errorBody);
+          errorMessage = parsed['message'] ?? parsed['status'] ?? errorMessage;
+        } catch (e) {
+          errorMessage = errorBody;
+        }
+      } else {
+        errorMessage = r.body?.message ?? r.base.reasonPhrase ?? errorMessage;
+      }
+      return '$errorMessage (Code: ${r.statusCode})';
     } catch (e) {
       return 'An error occurred: $e';
     }

@@ -48,3 +48,7 @@ app.*.map.json
 test_api_key.dart
 register_slave_script.dart
 api.json
+
+# Local credentials — never commit. Real values live here; secrets.example.json
+# is the committed template for new contributors.
+/secrets.json
