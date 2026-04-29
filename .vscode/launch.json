@@ -1,0 +1,15 @@
+﻿{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "QuantumPips (Chrome)",
+            "request": "launch",
+            "type": "dart",
+            "args": [
+                "--web-browser-flag",
+                "--disable-web-security",
+                "--dart-define=API_KEY=uC4yeUpV8kWEW2D30YU5jUBN9IKUiBLcX-vYxbvWeSGXGzGBJhwgqLhi9xm1q53AaYCutjFNBxv0fuSLd7QehfTWqtnBc5c0vzDloVVoKzrWnJpyAktz13kzxnfWt2DYkAqcDIuUtQzKex0SrBhB9V4jQ0o0ozgXx2FK1RWUygA"
+            ]
+        }
+    ]
+}
