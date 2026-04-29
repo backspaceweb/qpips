@@ -376,7 +376,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                     DataCell(Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (acc.platform == Platform.mt5)
+                        // Risk Settings only apply to slaves (they configure how
+                        // the slave copies the master's signals). Masters trade
+                        // manually and have nothing to risk-manage on this surface.
+                        if (acc.platform == Platform.mt5 && !acc.isMaster)
                           IconButton(
                             icon: const Icon(Icons.settings_outlined, size: 20, color: Color(0xFF6366F1)),
                             onPressed: () => _showRiskSettings(acc),
