@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/api/generated/api.swagger.dart';
 import '../domain/account.dart';
 import '../domain/order_control_settings.dart';
+import '../domain/symbol_map.dart';
 import '../domain/trade_order.dart';
 
 class TradingRepository {
@@ -98,27 +99,36 @@ class TradingRepository {
     };
   }
 
+  /// Activate or deactivate an account on its trading-server side.
+  /// Dispatches MT4/MT5 by [account.platform]. Other platforms (cTrader,
+  /// DxTrade, TradeLocker, MatchTrade) still need their own dispatch
+  /// branches added — return false until then.
   Future<bool> toggleAccountActivation({
-    required int userId,
-    required bool isMaster,
+    required Account account,
     required bool activate,
   }) async {
     try {
       Response<StringResponseDto> response;
-      if (isMaster) {
-        response = await _api.apiV1ActiveMasterMT5Post(
-          id: userId,
-          status: activate,
-        );
-      } else {
-        response = await _api.apiV1ActiveSlaveMT5Post(
-          id: userId,
-          status: activate,
-        );
+      switch (account.platform) {
+        case Platform.mt5:
+          response = account.isMaster
+              ? await _api.apiV1ActiveMasterMT5Post(id: account.serverId, status: activate)
+              : await _api.apiV1ActiveSlaveMT5Post(id: account.serverId, status: activate);
+          break;
+        case Platform.mt4:
+          response = account.isMaster
+              ? await _api.apiV1ActiveMasterMT4Post(id: account.serverId, status: activate)
+              : await _api.apiV1ActiveSlaveMT4Post(id: account.serverId, status: activate);
+          break;
+        default:
+          if (kDebugMode) {
+            print('toggleAccountActivation: ${account.platform.wireValue} not yet supported');
+          }
+          return false;
       }
       return response.isSuccessful;
     } catch (e) {
-      if (kDebugMode) print('Error toggling account activation: $e');
+      if (kDebugMode) print('toggleAccountActivation error: $e');
       return false;
     }
   }
@@ -287,6 +297,118 @@ class TradingRepository {
     } catch (e) {
       if (kDebugMode) print('updateOrderControlSettings error: $e');
       return false;
+    }
+  }
+
+  // --- B2.2: Symbol mapping (cross-broker) ---
+  //
+  // When master and slave are on different brokers, the same instrument
+  // may have a different symbol on each side (e.g. master "EURUSD",
+  // slave "EURUSD.x"). The trading server's symbol_map endpoints add
+  // a translation layer per slave account.
+
+  /// Register a symbol mapping for a slave account.
+  ///
+  /// `sourceSymbol` is the symbol as it appears on the master.
+  /// `followSymbol` is the symbol on the slave's broker.
+  /// `type` chooses Suffix (pattern-style) or Special (one-off).
+  Future<bool> addSymbolMap({
+    required Account account,
+    required String sourceSymbol,
+    required String followSymbol,
+    required SymbolMapType type,
+  }) async {
+    try {
+      Response response;
+      switch (account.platform) {
+        case Platform.mt5:
+          response = await _api.apiV1SymbolMapMt5Post(
+            userid: account.serverId,
+            sourceSymbol: sourceSymbol,
+            followSymbol: followSymbol,
+            type: type.wireValue,
+          );
+          break;
+        case Platform.mt4:
+          response = await _api.apiV1SymbolMapMt4Post(
+            userid: account.serverId,
+            sourceSymbol: sourceSymbol,
+            followSymbol: followSymbol,
+            type: type.wireValue,
+          );
+          break;
+        default:
+          if (kDebugMode) {
+            print('addSymbolMap: ${account.platform.wireValue} not yet supported');
+          }
+          return false;
+      }
+      return response.isSuccessful;
+    } catch (e) {
+      if (kDebugMode) print('addSymbolMap error: $e');
+      return false;
+    }
+  }
+
+  /// List the slave's currently-configured suffix mappings.
+  /// Returns an empty list on failure or unsupported platform.
+  Future<List<String>> getSuffixMappings({required Account account}) {
+    return _fetchSymbolList(
+      account: account,
+      mt5Path: '/api/v1/getSuffix/mt5/${account.serverId}',
+      mt4Path: '/api/v1/getSuffix/mt4/${account.serverId}',
+    );
+  }
+
+  /// List the slave's currently-configured special mappings.
+  Future<List<String>> getSpecialMappings({required Account account}) {
+    return _fetchSymbolList(
+      account: account,
+      mt5Path: '/api/v1/getSpecial/mt5/${account.serverId}',
+      mt4Path: '/api/v1/getSpecial/mt4/${account.serverId}',
+    );
+  }
+
+  /// Shared helper for the suffix / special list endpoints. Both return
+  /// either a JSON array of strings OR an empty array. The chopper
+  /// generated methods are typed `Response<dynamic>` so we use raw GET.
+  Future<List<String>> _fetchSymbolList({
+    required Account account,
+    required String mt5Path,
+    required String mt4Path,
+  }) async {
+    Uri uri;
+    switch (account.platform) {
+      case Platform.mt5:
+        uri = Uri.parse(mt5Path);
+        break;
+      case Platform.mt4:
+        uri = Uri.parse(mt4Path);
+        break;
+      default:
+        return [];
+    }
+    try {
+      final response = await _api.client.get(uri);
+      if (!response.isSuccessful || response.body == null) return [];
+      final body = response.body;
+      if (body is List) {
+        return body.map((e) => e.toString()).toList();
+      }
+      if (body is String) {
+        final s = body.trim();
+        if (!s.startsWith('[')) return [];
+        try {
+          final decoded = jsonDecode(s);
+          if (decoded is List) {
+            return decoded.map((e) => e.toString()).toList();
+          }
+        } catch (_) {}
+      }
+      return [];
+    } catch (e) {
+      if (kDebugMode) print('_fetchSymbolList error ($uri): $e');
+      return [];
     }
   }
 

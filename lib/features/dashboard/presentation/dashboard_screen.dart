@@ -416,8 +416,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Future<void> _toggleActivation(Account acc, bool value) async {
     final repo = context.read<TradingRepository>();
     final success = await repo.toggleAccountActivation(
-      userId: acc.serverId,
-      isMaster: acc.isMaster,
+      account: acc,
       activate: value,
     );
 
