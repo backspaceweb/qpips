@@ -1,0 +1,35 @@
+{
+    "name": "QuantumPips Admin",
+    "short_name": "QP Admin",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#0F4C3A",
+    "theme_color": "#0F4C3A",
+    "description": "QuantumPips admin panel.",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}

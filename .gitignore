@@ -32,6 +32,11 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Per-package build outputs after the D.4 workspace restructure
+packages/*/build/
+# Library-package lockfiles aren't meant to be checked in (consumers resolve)
+packages/core/pubspec.lock
+packages/design/pubspec.lock
 
 # Symbolication related
 app.*.symbols
