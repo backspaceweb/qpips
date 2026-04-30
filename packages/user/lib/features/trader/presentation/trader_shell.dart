@@ -8,6 +8,7 @@ import 'package:qp_design/widgets/demo_data_banner.dart';
 import 'discover/discover_screen.dart';
 import 'my_follows/my_follows_screen.dart';
 import 'placeholder_tab.dart';
+import 'plans/plans_screen.dart';
 import 'tabs.dart';
 import 'wallet/wallet_screen.dart';
 
@@ -38,6 +39,8 @@ class _TraderShellState extends State<TraderShell> {
         return const MyFollowsScreen();
       case TraderTab.wallet:
         return const WalletScreen();
+      case TraderTab.plans:
+        return const PlansScreen();
       case TraderTab.profile:
         return const PlaceholderTab(tabLabel: 'Profile');
       case TraderTab.settings:

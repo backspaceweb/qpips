@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/repositories/auth_repository.dart';
 import 'package:qp_core/repositories/signal_directory_repository.dart';
+import 'package:qp_core/repositories/subscription_repository.dart';
 import 'package:qp_core/repositories/trader_repository.dart';
 import 'package:qp_core/repositories/wallet_repository.dart';
 import 'package:qp_design/app_theme.dart';
@@ -54,6 +55,10 @@ class UserApp extends StatelessWidget {
         ),
         Provider<WalletRepository>(
           create: (_) => SupabaseWalletRepository(Supabase.instance.client),
+        ),
+        Provider<SubscriptionRepository>(
+          create: (_) =>
+              SupabaseSubscriptionRepository(Supabase.instance.client),
         ),
       ],
       child: MaterialApp(

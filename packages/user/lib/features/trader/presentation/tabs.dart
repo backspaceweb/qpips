@@ -11,6 +11,11 @@ enum TraderTab {
     Icons.account_balance_wallet_outlined,
     Icons.account_balance_wallet,
   ),
+  plans(
+    'Plans',
+    Icons.confirmation_number_outlined,
+    Icons.confirmation_number,
+  ),
   profile('Profile', Icons.person_outline, Icons.person),
   settings('Settings', Icons.settings_outlined, Icons.settings);
 

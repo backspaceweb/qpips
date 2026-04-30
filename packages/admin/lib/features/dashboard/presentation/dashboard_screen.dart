@@ -2,6 +2,7 @@ import 'dart:async';
 import 'widgets/price_ticker.dart';
 import 'widgets/mt5_risk_dialog.dart';
 import 'widgets/account_details_sheet.dart';
+import '../../plans/presentation/plans_screen.dart';
 import '../../wallets/presentation/wallets_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:qp_core/domain/account.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_core/repositories/auth_repository.dart';
+import 'package:qp_core/repositories/subscription_repository.dart';
 import 'package:qp_design/app_colors.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -27,6 +29,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     'activeTrades': 'No active trades',
     'latency': 'Checking...',
   };
+  int _userSlotBooked = 0;
   List<Account> _accounts = [];
   Timer? _refreshTimer;
 
@@ -72,16 +75,19 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   Future<void> _refreshData({bool silent = false}) async {
     if (!silent) setState(() => _isLoading = true);
     final repo = context.read<TradingRepository>();
+    final subs = context.read<SubscriptionRepository>();
 
     final results = await Future.wait([
       repo.getDashboardMetrics(),
       repo.syncAccountsWithServer(),
+      subs.getActiveSlotCount(),
     ]);
 
     if (mounted) {
       setState(() {
         _metrics = results[0] as Map<String, dynamic>;
         _accounts = results[1] as List<Account>;
+        _userSlotBooked = results[2] as int;
         if (!silent) _isLoading = false;
       });
     }
@@ -198,6 +204,17 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
             ),
           ),
           _buildNavItem(
+            Icons.confirmation_number_outlined,
+            'Plans',
+            false,
+            primary,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const PlansScreen(),
+              ),
+            ),
+          ),
+          _buildNavItem(
             Icons.analytics_outlined,
             'Analytics',
             false,
@@ -279,8 +296,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         const SizedBox(width: 24),
         _buildMetricCard('Account Limit', _metrics['accountLimit']?.toString() ?? '--', Icons.lock_clock, Colors.orange, isDark),
         const SizedBox(width: 24),
-        // 1A placeholder — wired to active subscriptions in 1B.
-        _buildMetricCard('User Slot Booked', '0', Icons.confirmation_number_outlined, AppColors.primaryAccent, isDark),
+        _buildMetricCard('User Slot Booked', _userSlotBooked.toString(), Icons.confirmation_number_outlined, AppColors.primaryAccent, isDark),
         const SizedBox(width: 24),
         _buildMetricCard('Active Trades', _metrics['activeTrades']?.toString() ?? 'No active trades', Icons.trending_up, Colors.green, isDark),
       ],

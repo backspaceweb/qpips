@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:qp_core/domain/user_subscription.dart';
 import 'package:qp_core/domain/wallet.dart';
 import 'package:qp_core/domain/wallet_transaction.dart';
+import 'package:qp_core/repositories/subscription_repository.dart';
 import 'package:qp_core/repositories/wallet_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 
-/// Trader's Wallet tab — balance hero + transaction history + Top Up.
+/// Trader's Wallet tab — balance hero + active subscriptions +
+/// transaction history + Top Up.
 ///
-/// 1A: Top Up shows static instructions ("contact operator"). 1B will
-/// add the buy-slots flow which debits from this wallet. 1C+ adds
-/// Stripe-funded deposits that auto-confirm via webhook.
+/// Slot-purchase flow lives on the separate Plans tab (sibling tab in
+/// the trader shell). 1A landed Top Up + transaction history. 1B added
+/// active subscriptions list (read-only here; purchase happens on
+/// Plans). 1C+ adds Stripe-funded deposits + auto-renewal.
 class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key});
 
@@ -29,13 +33,25 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Future<_WalletData> _load() async {
-    final repo = context.read<WalletRepository>();
-    final wallet = await repo.getMyWallet();
+    final walletRepo = context.read<WalletRepository>();
+    final subsRepo = context.read<SubscriptionRepository>();
+    final wallet = await walletRepo.getMyWallet();
     if (wallet == null) {
-      return const _WalletData(wallet: null, transactions: []);
+      return const _WalletData(
+        wallet: null,
+        transactions: [],
+        subscriptions: [],
+      );
     }
-    final txs = await repo.getMyTransactions();
-    return _WalletData(wallet: wallet, transactions: txs);
+    final results = await Future.wait([
+      walletRepo.getMyTransactions(),
+      subsRepo.getMyActiveSubscriptions(),
+    ]);
+    return _WalletData(
+      wallet: wallet,
+      transactions: results[0] as List<WalletTransaction>,
+      subscriptions: results[1] as List<UserSubscription>,
+    );
   }
 
   void _refresh() {
@@ -119,6 +135,41 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                     const SizedBox(height: AppSpacing.xxl),
                     Text(
+                      'Active subscriptions',
+                      style: AppTypography.titleLarge,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    if (data.subscriptions.isEmpty)
+                      _EmptySubscriptions(currency: data.wallet!.currency)
+                    else
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          border:
+                              Border.all(color: AppColors.surfaceBorder),
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.radiusLg),
+                        ),
+                        child: Column(
+                          children: [
+                            for (var i = 0;
+                                i < data.subscriptions.length;
+                                i++) ...[
+                              _SubscriptionRow(
+                                sub: data.subscriptions[i],
+                                currency: data.wallet!.currency,
+                              ),
+                              if (i != data.subscriptions.length - 1)
+                                const Divider(
+                                  height: 1,
+                                  color: AppColors.surfaceBorder,
+                                ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: AppSpacing.xxl),
+                    Text(
                       'Transaction history',
                       style: AppTypography.titleLarge,
                     ),
@@ -166,7 +217,12 @@ class _WalletScreenState extends State<WalletScreen> {
 class _WalletData {
   final Wallet? wallet;
   final List<WalletTransaction> transactions;
-  const _WalletData({required this.wallet, required this.transactions});
+  final List<UserSubscription> subscriptions;
+  const _WalletData({
+    required this.wallet,
+    required this.transactions,
+    required this.subscriptions,
+  });
 }
 
 // =============================================================================
@@ -176,8 +232,10 @@ class _WalletData {
 class _BalanceHero extends StatelessWidget {
   final Wallet wallet;
   final VoidCallback onTopUp;
-
-  const _BalanceHero({required this.wallet, required this.onTopUp});
+  const _BalanceHero({
+    required this.wallet,
+    required this.onTopUp,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -230,45 +288,21 @@ class _BalanceHero extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          Wrap(
-            spacing: AppSpacing.md,
-            runSpacing: AppSpacing.sm,
-            children: [
-              ElevatedButton.icon(
-                onPressed: onTopUp,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Top up'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.textOnDark,
-                  foregroundColor: AppColors.primary,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xl,
-                    vertical: AppSpacing.md,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                  ),
-                ),
+          ElevatedButton.icon(
+            onPressed: onTopUp,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Top up'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.textOnDark,
+              foregroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.xl,
+                vertical: AppSpacing.md,
               ),
-              OutlinedButton.icon(
-                onPressed: null,
-                icon: const Icon(Icons.shopping_cart_outlined, size: 18),
-                label: const Text('Buy slots — coming in 1B'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textOnDarkMuted,
-                  side: BorderSide(
-                    color: AppColors.textOnDark.withValues(alpha: 0.3),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xl,
-                    vertical: AppSpacing.md,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                  ),
-                ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
               ),
-            ],
+            ),
           ),
         ],
       ),
@@ -517,6 +551,124 @@ class _ErrorCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+//  Active subscriptions
+// =============================================================================
+
+class _SubscriptionRow extends StatelessWidget {
+  final UserSubscription sub;
+  final String currency;
+  const _SubscriptionRow({required this.sub, required this.currency});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+              border: Border.all(
+                color: AppColors.primaryAccent.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Text(
+              sub.tier.displayLabel.toUpperCase(),
+              style: AppTypography.labelSmall.copyWith(
+                color: AppColors.primary,
+                fontSize: 10,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${sub.slotCount} slot${sub.slotCount == 1 ? '' : 's'} · '
+                  '${_commitLabel(sub.commitmentMonths)}',
+                  style: AppTypography.titleMedium.copyWith(fontSize: 14),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Expires ${_formatDate(sub.expiresAt)}'
+                  '${sub.autoRenew ? ' · auto-renew on' : ''}',
+                  style: AppTypography.bodySmall.copyWith(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '$currency ${sub.totalPaid.toStringAsFixed(2)}',
+            style: AppTypography.titleMedium.copyWith(
+              fontSize: 13,
+              color: AppColors.textPrimary,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _commitLabel(int months) {
+    switch (months) {
+      case 1:
+        return 'Monthly';
+      case 3:
+        return '3 months';
+      case 6:
+        return '6 months';
+      case 12:
+        return 'Yearly';
+      default:
+        return '$months months';
+    }
+  }
+
+  String _formatDate(DateTime dt) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}-${two(dt.month)}-${two(dt.day)}';
+  }
+}
+
+class _EmptySubscriptions extends StatelessWidget {
+  final String currency;
+  const _EmptySubscriptions({required this.currency});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.surfaceBorder),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+      ),
+      child: Center(
+        child: Text(
+          "You don't have any active subscriptions yet. "
+          "Top up at least one slot's worth in $currency, then "
+          "tap Buy slots above.",
+          style: AppTypography.bodySmall,
+          textAlign: TextAlign.center,
+        ),
       ),
     );
   }
