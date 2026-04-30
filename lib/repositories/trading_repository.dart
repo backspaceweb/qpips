@@ -667,26 +667,14 @@ class TradingRepository {
     return result;
   }
 
-  // Phase C.1: this single endpoint is now routed through the Supabase
-  // Edge Function `trading-proxy`. The function injects the trading API
-  // key server-side (so it doesn't ship in the client bundle) and works
-  // around the server's getAPIInfo `?key=` quirk transparently.
-  //
-  // The other endpoints below still call the trading server directly —
-  // they'll be migrated in C.2 once we've verified this one works
-  // end-to-end.
+  // All trading-API calls now flow through the Supabase Edge Function
+  // (Phase C.2). Chopper's base URL points at the proxy, and
+  // SupabaseAuthInterceptor adds the JWT, so this reverts to a plain
+  // relative-path request. The proxy injects ?key= server-side for this
+  // endpoint to work around the trading server's spec quirk.
   Future<Map<String, dynamic>?> getAPIInfo() async {
     try {
-      final session = _supabase.auth.currentSession;
-      if (session == null) {
-        if (kDebugMode) print('getAPIInfo: no Supabase session');
-        return null;
-      }
-      const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
-      final response = await _api.client.get(
-        Uri.parse('$supabaseUrl/functions/v1/trading-proxy/api/v1/getAPIInfo'),
-        headers: {'Authorization': 'Bearer ${session.accessToken}'},
-      );
+      final response = await _api.client.get(Uri.parse('/api/v1/getAPIInfo'));
       if (response.isSuccessful && response.body != null) {
         return response.body as Map<String, dynamic>;
       }

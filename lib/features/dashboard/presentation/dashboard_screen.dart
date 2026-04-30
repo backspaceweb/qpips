@@ -195,7 +195,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   }
 
   Widget _buildHeader(bool isDark, Color primary) {
-    final hasKey = const String.fromEnvironment('API_KEY', defaultValue: '').isNotEmpty;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
       color: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -214,24 +213,6 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(width: 24),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: (hasKey ? Colors.green : Colors.red).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(radius: 4, backgroundColor: hasKey ? Colors.green : Colors.red),
-                    const SizedBox(width: 8),
-                    Text(
-                      hasKey ? 'API Connected' : 'API Disconnected',
-                      style: TextStyle(color: hasKey ? Colors.green : Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                  ],
                 ),
               ),
               const SizedBox(width: 20),
