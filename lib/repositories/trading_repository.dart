@@ -667,21 +667,25 @@ class TradingRepository {
     return result;
   }
 
-  // Auth note: ApiKeyInterceptor injects X-API-KEY header on every request
-  // through `_api.client`. Most endpoints accept header-only auth.
+  // Phase C.1: this single endpoint is now routed through the Supabase
+  // Edge Function `trading-proxy`. The function injects the trading API
+  // key server-side (so it doesn't ship in the client bundle) and works
+  // around the server's getAPIInfo `?key=` quirk transparently.
   //
-  // EXCEPTION: /api/v1/getAPIInfo rejects header-only with HTTP 400
-  // ("The key field is required.") even though the OpenAPI spec advertises
-  // the header-only ApiKey scheme. This is a server-side bug — TODO(server):
-  // ask the API team to fix getAPIInfo to honor the documented auth scheme.
-  // Until then we send the key as a query param for this one endpoint and
-  // accept the URL-leak risk for this single call.
+  // The other endpoints below still call the trading server directly —
+  // they'll be migrated in C.2 once we've verified this one works
+  // end-to-end.
   Future<Map<String, dynamic>?> getAPIInfo() async {
     try {
-      const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
+      final session = _supabase.auth.currentSession;
+      if (session == null) {
+        if (kDebugMode) print('getAPIInfo: no Supabase session');
+        return null;
+      }
+      const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
       final response = await _api.client.get(
-        Uri.parse('/api/v1/getAPIInfo'),
-        parameters: {'key': apiKey},
+        Uri.parse('$supabaseUrl/functions/v1/trading-proxy/api/v1/getAPIInfo'),
+        headers: {'Authorization': 'Bearer ${session.accessToken}'},
       );
       if (response.isSuccessful && response.body != null) {
         return response.body as Map<String, dynamic>;
