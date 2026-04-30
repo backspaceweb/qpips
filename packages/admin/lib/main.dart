@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,10 +9,22 @@ import 'features/registration/presentation/registration_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url: const String.fromEnvironment('SUPABASE_URL'),
-    anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
-  );
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  if (kDebugMode) {
+    if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+      debugPrint(
+        'WARNING: Supabase credentials are missing. Login + cloud features '
+        'will fail. Build with --dart-define-from-file=secrets.json (or '
+        'pass --dart-define=SUPABASE_URL=... and SUPABASE_ANON_KEY=...).',
+      );
+    } else {
+      debugPrint('Supabase credentials detected — connecting to cloud.');
+    }
+  }
+
+  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
 
   final isLoggedIn = Supabase.instance.client.auth.currentSession != null;
 
