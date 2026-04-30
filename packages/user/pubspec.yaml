@@ -10,8 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  provider: ^6.0.5
   qp_design:
     path: ../design
+  qp_core:
+    path: ../core
 
 dev_dependencies:
   flutter_test:

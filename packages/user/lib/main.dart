@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:qp_core/repositories/signal_directory_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_theme.dart';
@@ -7,10 +9,15 @@ import 'features/landing/presentation/landing_screen.dart';
 
 /// QuantumPips trader app.
 ///
-/// D.4 ships the landing page only. D.5 will add registration + sign-in,
-/// signal discovery, provider profile, configure-follow, and my-active-
-/// follows. At that point this main.dart will gain Supabase /
-/// MultiProvider scaffolding (the admin app already has it).
+/// D.4 shipped the landing page; D.5 adds the trader surfaces (signal
+/// discovery, provider profile, configure follow, my active follows).
+/// Today the app runs on mock data — see [MockSignalDirectoryRepository]
+/// in qp_core. Phase E swaps the repository for a Supabase-backed real
+/// implementation; no UI code changes.
+///
+/// Supabase auth + the trading-API client are NOT wired here yet. The
+/// landing CTAs route to a placeholder; Phase E adds the real sign-up
+/// flow alongside the real repository.
 void main() {
   runApp(const UserApp());
 }
@@ -20,16 +27,23 @@ class UserApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'QuantumPips',
-      theme: AppTheme.light(),
-      themeMode: ThemeMode.light,
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const LandingScreen(),
-        '/registration': (context) => const _ComingSoonScreen(),
-      },
+    return MultiProvider(
+      providers: [
+        Provider<SignalDirectoryRepository>(
+          create: (_) => MockSignalDirectoryRepository(),
+        ),
+      ],
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'QuantumPips',
+        theme: AppTheme.light(),
+        themeMode: ThemeMode.light,
+        initialRoute: '/',
+        routes: {
+          '/': (context) => const LandingScreen(),
+          '/registration': (context) => const _ComingSoonScreen(),
+        },
+      ),
     );
   }
 }
