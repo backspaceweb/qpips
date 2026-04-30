@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 enum TraderTab {
   discover('Discover', Icons.explore_outlined, Icons.explore),
   myFollows('My Follows', Icons.bookmark_outline, Icons.bookmark),
-  performance(
-    'Performance',
-    Icons.show_chart_outlined,
-    Icons.show_chart,
+  wallet(
+    'Wallet',
+    Icons.account_balance_wallet_outlined,
+    Icons.account_balance_wallet,
   ),
   profile('Profile', Icons.person_outline, Icons.person),
   settings('Settings', Icons.settings_outlined, Icons.settings);

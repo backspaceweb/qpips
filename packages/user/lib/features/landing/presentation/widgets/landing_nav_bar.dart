@@ -52,10 +52,13 @@ class LandingNavBar extends StatelessWidget {
                       Navigator.of(context).pushNamed('/app'),
                 ),
               ] else
-                IconButton(
-                  icon: const Icon(Icons.menu, color: AppColors.textOnDark),
-                  onPressed: () {},
-                  tooltip: 'Menu',
+                Builder(
+                  builder: (innerContext) => IconButton(
+                    icon: const Icon(Icons.menu, color: AppColors.textOnDark),
+                    onPressed: () =>
+                        Scaffold.of(innerContext).openEndDrawer(),
+                    tooltip: 'Menu',
+                  ),
                 ),
             ],
           ),

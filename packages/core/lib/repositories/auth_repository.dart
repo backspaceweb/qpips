@@ -37,4 +37,17 @@ class AuthRepository {
 
   Session? get currentSession => _supabase.auth.currentSession;
   bool get isLoggedIn => currentSession != null;
+
+  /// Calls the SQL `is_admin()` helper. Returns false on any error
+  /// (no session, RPC missing, network error) so callers can fail
+  /// closed without try/catching.
+  Future<bool> isCurrentUserAdmin() async {
+    if (currentSession == null) return false;
+    try {
+      final result = await _supabase.rpc('is_admin');
+      return result == true;
+    } catch (_) {
+      return false;
+    }
+  }
 }

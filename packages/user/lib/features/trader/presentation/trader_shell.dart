@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:qp_core/repositories/auth_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 import 'package:qp_design/widgets/demo_data_banner.dart';
 import 'discover/discover_screen.dart';
+import 'my_follows/my_follows_screen.dart';
 import 'placeholder_tab.dart';
 import 'tabs.dart';
+import 'wallet/wallet_screen.dart';
 
 /// Responsive shell for every trader-app screen.
 ///
@@ -31,15 +35,9 @@ class _TraderShellState extends State<TraderShell> {
       case TraderTab.discover:
         return const DiscoverScreen();
       case TraderTab.myFollows:
-        return const PlaceholderTab(
-          tabLabel: 'My Follows',
-          whenLanding:
-              'Track which providers your slave accounts are following, '
-              'live P&L per follow, and pause / unfollow with one tap. '
-              'Lands in D.5.4.',
-        );
-      case TraderTab.performance:
-        return const PlaceholderTab(tabLabel: 'Performance');
+        return const MyFollowsScreen();
+      case TraderTab.wallet:
+        return const WalletScreen();
       case TraderTab.profile:
         return const PlaceholderTab(tabLabel: 'Profile');
       case TraderTab.settings:
@@ -118,10 +116,63 @@ class _Sidebar extends StatelessWidget {
             ),
           const Spacer(),
           const Padding(
-            padding: EdgeInsets.all(AppSpacing.lg),
+            padding: EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.sm,
+            ),
+            child: _SignOut(),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              0,
+              AppSpacing.lg,
+              AppSpacing.lg,
+            ),
             child: _BackToLanding(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SignOut extends StatelessWidget {
+  const _SignOut();
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () async {
+        await context.read<AuthRepository>().signOut();
+        if (!context.mounted) return;
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/login',
+          (_) => false,
+        );
+      },
+      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.logout,
+              size: 16,
+              color: AppColors.textMuted,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(
+              'Sign out',
+              style: AppTypography.bodySmall.copyWith(
+                color: AppColors.textMuted,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

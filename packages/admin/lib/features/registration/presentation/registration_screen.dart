@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/repositories/auth_repository.dart';
+import 'package:qp_design/app_colors.dart';
 
 /// Super-admin login screen.
 ///
@@ -37,19 +38,50 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       _emailController.text.trim(),
       _passwordController.text,
     );
-    final isSuccess = message.contains('successful');
+    final loggedIn = message.contains('successful');
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-
-    if (isSuccess) {
-      Navigator.of(context).pushReplacementNamed('/dashboard');
+    if (!loggedIn) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
     }
 
+    // Login succeeded — but the admin panel is admin-only. Verify
+    // role before letting them in; sign out + show a clear error if
+    // a trader user tried to log in here.
+    final isAdmin = await authRepo.isCurrentUserAdmin();
+    if (!mounted) return;
+    if (!isAdmin) {
+      await authRepo.signOut();
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This account is not authorised for the admin panel. '
+            'Trader accounts should sign in via the user app.',
+          ),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = false);
+    Navigator.of(context).pushReplacementNamed('/dashboard');
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isSuccess ? Colors.green : Colors.redAccent,
+      const SnackBar(
+        content: Text('Login successful'),
+        backgroundColor: Colors.green,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -60,7 +92,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceMuted,
       body: Center(
         child: SingleChildScrollView(
           child: Container(
@@ -68,7 +100,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             padding: const EdgeInsets.all(32),
             margin: const EdgeInsets.symmetric(horizontal: 24),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? AppColors.surfaceDarkRaised : AppColors.surface,
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
@@ -93,7 +125,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                       letterSpacing: -1,
-                      color: Color(0xFF6366F1),
+                      color: AppColors.primary,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -125,7 +157,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                   ElevatedButton(
                     onPressed: _isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6366F1),
+                      backgroundColor: AppColors.primaryAccent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 20),
                       shape: RoundedRectangleBorder(
@@ -171,9 +203,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       style: TextStyle(color: isDark ? Colors.white : Colors.black87),
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon: Icon(icon, color: const Color(0xFF6366F1), size: 20),
+        prefixIcon: Icon(icon, color: AppColors.primaryAccent, size: 20),
         filled: true,
-        fillColor: isDark ? const Color(0xFF0F172A).withValues(alpha: 0.5) : const Color(0xFFF1F5F9),
+        fillColor: isDark ? AppColors.surfaceDark.withValues(alpha: 0.5) : AppColors.surfaceMuted,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,

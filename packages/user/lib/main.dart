@@ -1,25 +1,38 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:qp_core/repositories/auth_repository.dart';
 import 'package:qp_core/repositories/signal_directory_repository.dart';
-import 'package:qp_design/app_colors.dart';
-import 'package:qp_design/app_spacing.dart';
+import 'package:qp_core/repositories/trader_repository.dart';
+import 'package:qp_core/repositories/wallet_repository.dart';
 import 'package:qp_design/app_theme.dart';
-import 'package:qp_design/app_typography.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'features/auth/presentation/trader_login_screen.dart';
 import 'features/landing/presentation/landing_screen.dart';
 import 'features/trader/presentation/trader_shell.dart';
 
 /// QuantumPips trader app.
 ///
-/// D.4 shipped the landing page; D.5 adds the trader surfaces (signal
-/// discovery, provider profile, configure follow, my active follows).
-/// Today the app runs on mock data — see [MockSignalDirectoryRepository]
-/// in qp_core. Phase E swaps the repository for a Supabase-backed real
-/// implementation; no UI code changes.
-///
-/// Supabase auth + the trading-API client are NOT wired here yet. The
-/// landing CTAs route to a placeholder; Phase E adds the real sign-up
-/// flow alongside the real repository.
-void main() {
+/// 1A wires Supabase Auth + the WalletRepository in. The trader app
+/// still uses the mock SignalDirectoryRepository + TraderRepository for
+/// the Discover / My Follows surfaces (Phase E swaps those for real
+/// Supabase-backed implementations). Auth is real today: visiting
+/// `/app` redirects to `/login` until a Supabase session exists.
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  if (kDebugMode && (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty)) {
+    debugPrint(
+      'WARNING: Supabase credentials are missing. Login + wallet will '
+      'fail. Build with --dart-define-from-file=secrets.json.',
+    );
+  }
+
+  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
+
   runApp(const UserApp());
 }
 
@@ -33,6 +46,15 @@ class UserApp extends StatelessWidget {
         Provider<SignalDirectoryRepository>(
           create: (_) => MockSignalDirectoryRepository(),
         ),
+        Provider<TraderRepository>(
+          create: (_) => MockTraderRepository(),
+        ),
+        Provider<AuthRepository>(
+          create: (_) => AuthRepository(),
+        ),
+        Provider<WalletRepository>(
+          create: (_) => SupabaseWalletRepository(Supabase.instance.client),
+        ),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -42,60 +64,27 @@ class UserApp extends StatelessWidget {
         initialRoute: '/',
         routes: {
           '/': (context) => const LandingScreen(),
-          '/app': (context) => const TraderShell(),
-          '/registration': (context) => const _ComingSoonScreen(),
+          '/login': (context) => const TraderLoginScreen(),
+          '/app': (context) => const _AuthGate(child: TraderShell()),
+          '/registration': (context) => const TraderLoginScreen(),
         },
       ),
     );
   }
 }
 
-/// Placeholder shown when landing-page CTAs route to `/registration`. The
-/// real trader sign-up flow lands in D.5.
-class _ComingSoonScreen extends StatelessWidget {
-  const _ComingSoonScreen();
+/// Gate around `/app`. Renders the login screen when there's no active
+/// Supabase session; otherwise hands off to the wrapped child.
+class _AuthGate extends StatelessWidget {
+  final Widget child;
+  const _AuthGate({required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.surface,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: AppColors.textPrimary),
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.x3),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.rocket_launch_outlined,
-                color: AppColors.primaryAccent,
-                size: 64,
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              Text(
-                'Trader sign-up is on the way.',
-                style: AppTypography.headlineLarge,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: Text(
-                  'We are wiring up the discovery + follow flow next. '
-                  'Want early access? Email us at hello@quantumpips.app '
-                  'and we will reach out the moment it ships.',
-                  style: AppTypography.bodyLarge,
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      return const TraderLoginScreen();
+    }
+    return child;
   }
 }

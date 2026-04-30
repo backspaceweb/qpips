@@ -5,6 +5,7 @@ import 'package:qp_core/domain/order_control_settings.dart';
 import 'package:qp_core/domain/symbol_map.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_core/api/generated/api.swagger.dart';
+import 'package:qp_design/app_colors.dart';
 
 /// Per-slave settings dialog. Two tabs:
 ///   1. Risk & Stops — risk multiplier, copy SL/TP, scalper mode, order filter
@@ -220,7 +221,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
           width: 810,
           constraints: const BoxConstraints(maxHeight: 720),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: isDark ? AppColors.surfaceDarkRaised : AppColors.surface,
             borderRadius: BorderRadius.circular(24),
           ),
           child: _isLoading
@@ -235,8 +236,8 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
                         Tab(text: 'Order Control'),
                         Tab(text: 'Symbols'),
                       ],
-                      labelColor: Color(0xFF6366F1),
-                      indicatorColor: Color(0xFF6366F1),
+                      labelColor: AppColors.primaryAccent,
+                      indicatorColor: AppColors.primaryAccent,
                     ),
                     Flexible(
                       child: TabBarView(
@@ -295,7 +296,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
             child: ElevatedButton(
               onPressed: _isSaving ? null : _saveSettings,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
+                backgroundColor: AppColors.primaryAccent,
                 foregroundColor: Colors.white,
               ),
               child: _isSaving
@@ -504,7 +505,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
                       : const Icon(Icons.add, size: 16),
                   label: const Text('Add'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6366F1),
+                    backgroundColor: AppColors.primaryAccent,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -569,7 +570,7 @@ class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
                 .map((s) => Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                        color: AppColors.primaryAccent.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(s, style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),

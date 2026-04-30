@@ -5,6 +5,8 @@ import 'package:qp_core/repositories/signal_directory_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
+import '../follow/configure_follow_sheet.dart';
+import '../profile/provider_profile_screen.dart';
 import 'widgets/filter_strip.dart';
 import 'widgets/provider_card.dart';
 
@@ -59,9 +61,10 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             : width >= AppSpacing.tabletMin
                 ? 2
                 : 1;
-    // Card aspect ratio tuned for the tightest column on each layout —
-    // wider cards on mobile, taller-narrow on desktop.
-    final aspectRatio = crossAxisCount == 1 ? 1.4 : 0.78;
+    // Multi-column grids need an explicit aspect ratio so all tiles
+    // line up. Single-column mobile stacks as a Column (below) — cards
+    // size to intrinsic content there, no rigid ratio.
+    const aspectRatio = 0.78;
 
     final hPad = width >= AppSpacing.desktopMin
         ? AppSpacing.x3
@@ -135,6 +138,31 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                       'Try a different time window or clear the search.',
                 );
               }
+              if (crossAxisCount == 1) {
+                // SizedBox forces full viewport width — without it the
+                // outer SingleChildScrollView's Column hands out
+                // unbounded width and `stretch` shrink-wraps to card
+                // content (~200px) instead of filling the row.
+                return SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < items.length; i++) ...[
+                        if (i > 0) const SizedBox(height: AppSpacing.lg),
+                        ProviderCard(
+                          listing: items[i],
+                          onTap: () => _openProfile(context, items[i].id),
+                          onFollow: () => showConfigureFollowSheet(
+                            context,
+                            master: items[i],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              }
               return GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -147,12 +175,11 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 ),
                 itemBuilder: (_, i) => ProviderCard(
                   listing: items[i],
-                  onTap: () {
-                    // D.5.2 wires the provider profile route. For D.5.1
-                    // this is a no-op so the hover state still feels
-                    // intentional.
-                  },
-                  onFollow: () => _showFollowSnack(context),
+                  onTap: () => _openProfile(context, items[i].id),
+                  onFollow: () => showConfigureFollowSheet(
+                    context,
+                    master: items[i],
+                  ),
                 ),
               );
             },
@@ -162,16 +189,14 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     );
   }
 
-  void _showFollowSnack(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Configure Follow flow lands in the next sub-PR (D.5.3).',
-        ),
-        duration: Duration(seconds: 2),
+  void _openProfile(BuildContext context, String providerId) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProviderProfileScreen(providerId: providerId),
       ),
     );
   }
+
 }
 
 class _Empty extends StatelessWidget {

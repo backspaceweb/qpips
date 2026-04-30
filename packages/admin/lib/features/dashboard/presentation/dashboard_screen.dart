@@ -2,12 +2,14 @@ import 'dart:async';
 import 'widgets/price_ticker.dart';
 import 'widgets/mt5_risk_dialog.dart';
 import 'widgets/account_details_sheet.dart';
+import '../../wallets/presentation/wallets_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/domain/account.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_core/repositories/auth_repository.dart';
+import 'package:qp_design/app_colors.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -106,28 +108,27 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = const Color(0xFF6366F1);
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceMuted,
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showAccountForm(context),
-        backgroundColor: primaryColor,
+        backgroundColor: AppColors.primaryAccent,
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text('Add Account', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
       body: Row(
         children: [
-          _buildSidebar(isDark, primaryColor),
+          _buildSidebar(isDark, AppColors.primaryAccent),
           Expanded(
             child: Column(
               children: [
-                _buildHeader(isDark, primaryColor),
+                _buildHeader(isDark, AppColors.primaryAccent),
                 const PriceTicker(),
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: _refreshData,
-                    color: primaryColor,
+                    color: AppColors.primaryAccent,
                     child: _isLoading 
                       ? const Center(child: CircularProgressIndicator())
                       : SingleChildScrollView(
@@ -156,7 +157,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       width: _isSidebarCollapsed ? 80 : 260,
-      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      color: isDark ? AppColors.surfaceDarkRaised : AppColors.surface,
       child: Column(
         children: [
           const SizedBox(height: 24),
@@ -166,13 +167,50 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           ),
           if (!_isSidebarCollapsed) ...[
             const SizedBox(height: 20),
-            const Text('QuantumPips', style: TextStyle(color: Color(0xFF6366F1), fontSize: 22, fontWeight: FontWeight.bold)),
+            const Text('QuantumPips', style: TextStyle(color: AppColors.primary, fontSize: 22, fontWeight: FontWeight.bold)),
           ],
           const SizedBox(height: 40),
-          _buildNavItem(Icons.dashboard_outlined, 'Dashboard', true, primary),
-          _buildNavItem(Icons.account_balance_outlined, 'Accounts', false, primary),
-          _buildNavItem(Icons.analytics_outlined, 'Analytics', false, primary),
-          _buildNavItem(Icons.settings_outlined, 'Settings', false, primary),
+          _buildNavItem(
+            Icons.dashboard_outlined,
+            'Dashboard',
+            true,
+            primary,
+            onTap: () =>
+                Navigator.of(context).popUntil((r) => r.isFirst),
+          ),
+          _buildNavItem(
+            Icons.account_balance_outlined,
+            'Accounts',
+            false,
+            primary,
+            onTap: () =>
+                Navigator.of(context).popUntil((r) => r.isFirst),
+          ),
+          _buildNavItem(
+            Icons.account_balance_wallet_outlined,
+            'Wallets',
+            false,
+            primary,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const WalletsScreen(),
+              ),
+            ),
+          ),
+          _buildNavItem(
+            Icons.analytics_outlined,
+            'Analytics',
+            false,
+            primary,
+            onTap: () => _comingSoon(context, 'Analytics'),
+          ),
+          _buildNavItem(
+            Icons.settings_outlined,
+            'Settings',
+            false,
+            primary,
+            onTap: () => _comingSoon(context, 'Settings'),
+          ),
           const Spacer(),
           _buildNavItem(Icons.logout, 'Logout', false, Colors.redAccent, onTap: () async {
              await context.read<AuthRepository>().signOut();
@@ -194,10 +232,20 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     );
   }
 
+  void _comingSoon(BuildContext context, String label) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$label section coming soon.'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Widget _buildHeader(bool isDark, Color primary) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      color: isDark ? AppColors.surfaceDarkRaised : AppColors.surface,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -231,6 +279,9 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
         const SizedBox(width: 24),
         _buildMetricCard('Account Limit', _metrics['accountLimit']?.toString() ?? '--', Icons.lock_clock, Colors.orange, isDark),
         const SizedBox(width: 24),
+        // 1A placeholder — wired to active subscriptions in 1B.
+        _buildMetricCard('User Slot Booked', '0', Icons.confirmation_number_outlined, AppColors.primaryAccent, isDark),
+        const SizedBox(width: 24),
         _buildMetricCard('Active Trades', _metrics['activeTrades']?.toString() ?? 'No active trades', Icons.trending_up, Colors.green, isDark),
       ],
     );
@@ -241,7 +292,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          color: isDark ? AppColors.surfaceDarkRaised : AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
         ),
@@ -264,7 +315,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? AppColors.surfaceDarkRaised : AppColors.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
       ),
@@ -278,12 +329,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.sync, size: 20, color: Color(0xFF6366F1)),
+                    icon: const Icon(Icons.sync, size: 20, color: AppColors.primaryAccent),
                     onPressed: _loadInitialData,
                     tooltip: 'Sync with server',
                   ),
                   IconButton(
-                    icon: const Icon(Icons.refresh, size: 20, color: Color(0xFF6366F1)),
+                    icon: const Icon(Icons.refresh, size: 20, color: AppColors.primaryAccent),
                     onPressed: _refreshData,
                     tooltip: 'Refresh status',
                   ),
@@ -364,7 +415,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                         if (!acc.isMaster &&
                             (acc.platform == Platform.mt5 || acc.platform == Platform.mt4))
                           IconButton(
-                            icon: const Icon(Icons.settings_outlined, size: 20, color: Color(0xFF6366F1)),
+                            icon: const Icon(Icons.settings_outlined, size: 20, color: AppColors.primaryAccent),
                             onPressed: () => _showRiskSettings(acc),
                             tooltip: 'Slave Settings',
                           ),
@@ -680,7 +731,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
+                backgroundColor: AppColors.primaryAccent,
                 foregroundColor: Colors.white,
               ),
               child: isSubmitting

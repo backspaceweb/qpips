@@ -2,10 +2,12 @@ import 'package:chopper/chopper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'generated/api.swagger.dart';
 import '../interceptors/supabase_auth_interceptor.dart';
-import '../repositories/trading_repository.dart';
 import '../repositories/auth_repository.dart';
+import '../repositories/trading_repository.dart';
+import '../repositories/wallet_repository.dart';
 
 class ApiClientProvider {
   /// All trading-API calls flow through the Supabase Edge Function
@@ -36,6 +38,10 @@ class ApiClientProvider {
 
     Provider<AuthRepository>(
       create: (_) => AuthRepository(),
+    ),
+
+    Provider<WalletRepository>(
+      create: (_) => SupabaseWalletRepository(Supabase.instance.client),
     ),
   ];
 }

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
+import 'package:qp_design/app_colors.dart';
 
 class PriceTicker extends StatefulWidget {
   const PriceTicker({super.key});
@@ -47,7 +48,7 @@ class _PriceTickerState extends State<PriceTicker> {
       height: 50,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? AppColors.surfaceDarkRaised : AppColors.surface,
         border: Border(bottom: BorderSide(color: isDark ? Colors.white10 : Colors.black12)),
       ),
       child: ListView(

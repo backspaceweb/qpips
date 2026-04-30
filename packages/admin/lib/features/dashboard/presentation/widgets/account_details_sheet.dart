@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:qp_core/domain/account.dart';
 import 'package:qp_core/domain/trade_order.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
+import 'package:qp_design/app_colors.dart';
 
 /// Bottom sheet showing live order data for a single account.
 ///
@@ -245,9 +246,9 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
         ),
       ),
       child: TabBar(
-        labelColor: const Color(0xFF6366F1),
+        labelColor: AppColors.primaryAccent,
         unselectedLabelColor: Colors.grey,
-        indicatorColor: const Color(0xFF6366F1),
+        indicatorColor: AppColors.primaryAccent,
         indicatorWeight: 2.5,
         labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         tabs: [
