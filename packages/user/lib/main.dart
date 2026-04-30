@@ -6,6 +6,7 @@ import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_theme.dart';
 import 'package:qp_design/app_typography.dart';
 import 'features/landing/presentation/landing_screen.dart';
+import 'features/trader/presentation/trader_shell.dart';
 
 /// QuantumPips trader app.
 ///
@@ -41,6 +42,7 @@ class UserApp extends StatelessWidget {
         initialRoute: '/',
         routes: {
           '/': (context) => const LandingScreen(),
+          '/app': (context) => const TraderShell(),
           '/registration': (context) => const _ComingSoonScreen(),
         },
       ),

@@ -49,7 +49,7 @@ class LandingNavBar extends StatelessWidget {
                 PrimaryButton(
                   label: 'Get Started',
                   onPressed: () =>
-                      Navigator.of(context).pushNamed('/registration'),
+                      Navigator.of(context).pushNamed('/app'),
                 ),
               ] else
                 IconButton(

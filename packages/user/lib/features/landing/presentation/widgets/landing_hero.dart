@@ -122,7 +122,7 @@ class _HeroText extends StatelessWidget {
                 large: !isMobile,
                 icon: Icons.arrow_forward,
                 onPressed: () =>
-                    Navigator.of(context).pushNamed('/registration'),
+                    Navigator.of(context).pushNamed('/app'),
               ),
               SecondaryButton(
                 label: 'See how it works',
