@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../../../../domain/account.dart';
 import '../../../../domain/trade_order.dart';
 import '../../../../repositories/trading_repository.dart';
-import 'edit_sltp_dialog.dart';
 
 /// Bottom sheet showing live order data for a single account.
 ///
@@ -313,7 +312,6 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
           const DataColumn(label: Text('TP'), numeric: true),
           const DataColumn(label: Text('Profit'), numeric: true),
           const DataColumn(label: Text('Time')),
-          if (isOpenView) const DataColumn(label: Text('Actions')),
         ],
         rows: orders.map((o) => DataRow(cells: [
           DataCell(Text(o.ticket.toString(), style: const TextStyle(fontFamily: 'monospace'))),
@@ -336,101 +334,9 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
             ),
           )),
           DataCell(Text(_fmtTime(isOpenView ? o.openTime : o.lastUpdateTime))),
-          if (isOpenView)
-            DataCell(Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF6366F1)),
-                  onPressed: () => _editOrder(o),
-                  tooltip: 'Edit SL/TP',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 18, color: Colors.redAccent),
-                  onPressed: () => _confirmCloseOrder(o),
-                  tooltip: 'Close order',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
-              ],
-            )),
         ])).toList(),
       ),
     );
-  }
-
-  Future<void> _editOrder(TradeOrder order) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => EditSlTpDialog(account: widget.account, order: order),
-    );
-    if (ok == true && mounted) {
-      _reloadOrders();
-    }
-  }
-
-  Future<void> _confirmCloseOrder(TradeOrder order) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Close order?'),
-        content: Text(
-          'Close order #${order.ticket} '
-          '(${order.orderType} ${_fmtLots(order.lots)} ${order.symbol}) '
-          'at the current market price?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    final repo = context.read<TradingRepository>();
-    final ok = await repo.closeOrder(account: widget.account, ticket: order.ticket);
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(ok
-            ? 'Order #${order.ticket} closed'
-            : 'Failed to close order #${order.ticket}'),
-      ),
-    );
-    if (ok) _reloadOrders();
-  }
-
-  Future<void> _reloadOrders() async {
-    final repo = context.read<TradingRepository>();
-    final now = DateTime.now();
-    final from = now.subtract(const Duration(days: 7));
-    final results = await Future.wait([
-      repo.getOpenOrders(account: widget.account),
-      repo.getOrderHistory(
-        account: widget.account,
-        from: from,
-        to: now,
-        tradesOnly: true,
-      ),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _open = results[0];
-      _history = results[1];
-    });
   }
 
   Widget _sideChip(TradeOrder o) {
