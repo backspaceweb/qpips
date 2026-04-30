@@ -1,7 +1,9 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/api/api_client_provider.dart';
+import 'design/app_theme.dart';
+import 'features/landing/presentation/landing_screen.dart';
 import 'features/registration/presentation/registration_screen.dart';
 import 'features/dashboard/presentation/dashboard_screen.dart';
 
@@ -21,7 +23,7 @@ void main() async {
   runApp(
     MultiProvider(
       providers: ApiClientProvider.providers,
-      child: MyApp(initialRoute: isLoggedIn ? '/dashboard' : '/registration'),
+      child: MyApp(initialRoute: isLoggedIn ? '/dashboard' : '/'),
     ),
   );
 }
@@ -35,23 +37,14 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'QuantumPips',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6366F1),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6366F1),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      themeMode: ThemeMode.system,
+      theme: AppTheme.light(),
+      // Force light mode for now — the landing page is designed light;
+      // dark theme will be enabled per-route once the app surfaces also
+      // support it.
+      themeMode: ThemeMode.light,
       initialRoute: initialRoute,
       routes: {
+        '/': (context) => const LandingScreen(),
         '/registration': (context) => const RegistrationScreen(),
         '/dashboard': (context) => const DashboardScreen(),
       },
