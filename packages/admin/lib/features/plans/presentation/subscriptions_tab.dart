@@ -20,6 +20,7 @@ class SubscriptionsTab extends StatefulWidget {
 
 class _SubscriptionsTabState extends State<SubscriptionsTab> {
   Future<List<UserSubscription>>? _future;
+  bool _running = false;
 
   @override
   void initState() {
@@ -37,15 +38,93 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
     });
   }
 
+  Future<void> _runRenewals() async {
+    setState(() => _running = true);
+    try {
+      final result =
+          await context.read<SubscriptionRepository>().processRenewalsNow();
+      if (!mounted) return;
+      _refresh();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Renewals processed — renewed ${result.renewedCount}, '
+            'expired ${result.expiredCount}.',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Couldn't run renewals: $e"),
+          backgroundColor: AppColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      color: AppColors.primaryAccent,
-      onRefresh: () async {
-        _refresh();
-        await _future;
-      },
-      child: FutureBuilder<List<UserSubscription>>(
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xl,
+            AppSpacing.lg,
+            AppSpacing.xl,
+            AppSpacing.md,
+          ),
+          color: AppColors.surfaceMuted,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'A daily cron runs renewals at 00:00 UTC. Use the '
+                  'button to force a pass for testing.',
+                  style: AppTypography.bodySmall,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              ElevatedButton.icon(
+                onPressed: _running ? null : _runRenewals,
+                icon: _running
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.textOnDark,
+                        ),
+                      )
+                    : const Icon(Icons.refresh, size: 16),
+                label: const Text('Run renewals now'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryAccent,
+                  foregroundColor: AppColors.textOnDark,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                    vertical: AppSpacing.md,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            color: AppColors.primaryAccent,
+            onRefresh: () async {
+              _refresh();
+              await _future;
+            },
+            child: FutureBuilder<List<UserSubscription>>(
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -82,7 +161,10 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
             },
           );
         },
-      ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

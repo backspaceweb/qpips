@@ -9,6 +9,8 @@ import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 
+const _expirySoonThreshold = Duration(days: 3);
+
 /// Trader's Wallet tab — balance hero + active subscriptions +
 /// transaction history + Top Up.
 ///
@@ -126,6 +128,11 @@ class _WalletScreenState extends State<WalletScreen> {
                 if (data.wallet == null) {
                   return const _NoWalletCard();
                 }
+                final expiringSoon = data.subscriptions
+                    .where((s) =>
+                        s.expiresAt.difference(DateTime.now()) <
+                        _expirySoonThreshold)
+                    .toList();
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -133,6 +140,13 @@ class _WalletScreenState extends State<WalletScreen> {
                       wallet: data.wallet!,
                       onTopUp: _showTopUpSheet,
                     ),
+                    if (expiringSoon.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.lg),
+                      _ExpirySoonBanner(
+                        count: expiringSoon.length,
+                        currency: data.wallet!.currency,
+                      ),
+                    ],
                     const SizedBox(height: AppSpacing.xxl),
                     Text(
                       'Active subscriptions',
@@ -158,6 +172,7 @@ class _WalletScreenState extends State<WalletScreen> {
                               _SubscriptionRow(
                                 sub: data.subscriptions[i],
                                 currency: data.wallet!.currency,
+                                onChanged: _refresh,
                               ),
                               if (i != data.subscriptions.length - 1)
                                 const Divider(
@@ -557,16 +572,121 @@ class _ErrorCard extends StatelessWidget {
 }
 
 // =============================================================================
-//  Active subscriptions
+//  Expiring-soon banner
 // =============================================================================
 
-class _SubscriptionRow extends StatelessWidget {
-  final UserSubscription sub;
+class _ExpirySoonBanner extends StatelessWidget {
+  final int count;
   final String currency;
-  const _SubscriptionRow({required this.sub, required this.currency});
+  const _ExpirySoonBanner({required this.count, required this.currency});
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(
+          color: AppColors.warning.withValues(alpha: 0.40),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: AppColors.warning,
+            size: 20,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              '$count subscription${count == 1 ? '' : 's'} '
+              'expir${count == 1 ? 'es' : 'e'} within 3 days. '
+              'Top up your $currency wallet to keep '
+              '${count == 1 ? 'it' : 'them'} active — auto-renew '
+              'charges from your wallet on the expiry date.',
+              style: AppTypography.bodySmall.copyWith(
+                color: AppColors.textPrimary,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+//  Active subscriptions
+// =============================================================================
+
+class _SubscriptionRow extends StatefulWidget {
+  final UserSubscription sub;
+  final String currency;
+  final VoidCallback onChanged;
+  const _SubscriptionRow({
+    required this.sub,
+    required this.currency,
+    required this.onChanged,
+  });
+
+  @override
+  State<_SubscriptionRow> createState() => _SubscriptionRowState();
+}
+
+class _SubscriptionRowState extends State<_SubscriptionRow> {
+  late bool _autoRenew;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoRenew = widget.sub.autoRenew;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SubscriptionRow old) {
+    super.didUpdateWidget(old);
+    if (old.sub.autoRenew != widget.sub.autoRenew) {
+      _autoRenew = widget.sub.autoRenew;
+    }
+  }
+
+  Future<void> _toggleAutoRenew(bool next) async {
+    final previous = _autoRenew;
+    setState(() {
+      _autoRenew = next;
+      _saving = true;
+    });
+    try {
+      await context.read<SubscriptionRepository>().setAutoRenew(
+            subscriptionId: widget.sub.id,
+            autoRenew: next,
+          );
+      if (!mounted) return;
+      setState(() => _saving = false);
+      widget.onChanged();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _autoRenew = previous;
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Update failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final daysLeft = widget.sub.expiresAt.difference(DateTime.now()).inDays;
+    final expiringSoon =
+        widget.sub.expiresAt.difference(DateTime.now()) < _expirySoonThreshold;
+    final expiryColor = expiringSoon ? AppColors.warning : AppColors.textMuted;
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,
@@ -584,7 +704,7 @@ class _SubscriptionRow extends StatelessWidget {
               ),
             ),
             child: Text(
-              sub.tier.displayLabel.toUpperCase(),
+              widget.sub.tier.displayLabel.toUpperCase(),
               style: AppTypography.labelSmall.copyWith(
                 color: AppColors.primary,
                 fontSize: 10,
@@ -598,29 +718,66 @@ class _SubscriptionRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${sub.slotCount} slot${sub.slotCount == 1 ? '' : 's'} · '
-                  '${_commitLabel(sub.commitmentMonths)}',
+                  '${widget.sub.slotCount} slot'
+                  '${widget.sub.slotCount == 1 ? '' : 's'} · '
+                  '${_commitLabel(widget.sub.commitmentMonths)}',
                   style: AppTypography.titleMedium.copyWith(fontSize: 14),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Expires ${_formatDate(sub.expiresAt)}'
-                  '${sub.autoRenew ? ' · auto-renew on' : ''}',
+                  expiringSoon
+                      ? 'Expires in ${daysLeft <= 0 ? '<1' : daysLeft} '
+                          'day${daysLeft == 1 ? '' : 's'} · '
+                          '${_formatDate(widget.sub.expiresAt)}'
+                      : 'Expires ${_formatDate(widget.sub.expiresAt)}',
                   style: AppTypography.bodySmall.copyWith(
-                    color: AppColors.textMuted,
+                    color: expiryColor,
                     fontSize: 11,
+                    fontWeight: expiringSoon
+                        ? FontWeight.w600
+                        : FontWeight.w400,
                   ),
                 ),
               ],
             ),
           ),
-          Text(
-            '$currency ${sub.totalPaid.toStringAsFixed(2)}',
-            style: AppTypography.titleMedium.copyWith(
-              fontSize: 13,
-              color: AppColors.textPrimary,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+          const SizedBox(width: AppSpacing.md),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${widget.currency} '
+                '${widget.sub.totalPaid.toStringAsFixed(2)}',
+                style: AppTypography.titleMedium.copyWith(
+                  fontSize: 13,
+                  color: AppColors.textPrimary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Auto-renew',
+                    style: AppTypography.labelSmall.copyWith(
+                      color: AppColors.textMuted,
+                      fontSize: 10,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Transform.scale(
+                    scale: 0.75,
+                    child: Switch(
+                      value: _autoRenew,
+                      onChanged: _saving ? null : _toggleAutoRenew,
+                      activeColor: AppColors.primaryAccent,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ],
       ),

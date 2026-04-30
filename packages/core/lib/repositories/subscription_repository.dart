@@ -41,12 +41,34 @@ abstract class SubscriptionRepository {
     required int commitmentMonths,
   });
 
+  /// Trader toggles auto-renew on one of their own active subscriptions.
+  /// Returns the updated row.
+  Future<UserSubscription> setAutoRenew({
+    required String subscriptionId,
+    required bool autoRenew,
+  });
+
   // ---- Admin-side ----
   Future<List<UserSubscription>> listAllSubscriptions();
 
   /// Sum of [UserSubscription.slotCount] across rows where status =
   /// 'active'. Drives the "User Slot Booked" metric card.
   Future<int> getActiveSlotCount();
+
+  /// Triggers the renewal/expiry pass on demand. In production a daily
+  /// pg_cron job runs the same SQL function; this method exists so admin
+  /// can force a pass for testing. Returns (renewed, expired) counts.
+  Future<RenewalsResult> processRenewalsNow();
+}
+
+class RenewalsResult {
+  final int renewedCount;
+  final int expiredCount;
+
+  const RenewalsResult({
+    required this.renewedCount,
+    required this.expiredCount,
+  });
 }
 
 class SupabaseSubscriptionRepository implements SubscriptionRepository {
@@ -151,6 +173,32 @@ class SupabaseSubscriptionRepository implements SubscriptionRepository {
       totalPaid: (row['total_paid'] as num).toDouble(),
       expiresAt: DateTime.parse(row['expires_at'] as String),
       newWalletBalance: (row['new_wallet_balance'] as num).toDouble(),
+    );
+  }
+
+  @override
+  Future<UserSubscription> setAutoRenew({
+    required String subscriptionId,
+    required bool autoRenew,
+  }) async {
+    final result = await _client.rpc(
+      'set_auto_renew',
+      params: {
+        'p_subscription_id': subscriptionId,
+        'p_auto_renew': autoRenew,
+      },
+    );
+    final row = _firstRow(result);
+    return UserSubscription.fromJson(row);
+  }
+
+  @override
+  Future<RenewalsResult> processRenewalsNow() async {
+    final result = await _client.rpc('process_subscription_renewals');
+    final row = _firstRow(result);
+    return RenewalsResult(
+      renewedCount: row['renewed_count'] as int,
+      expiredCount: row['expired_count'] as int,
     );
   }
 
