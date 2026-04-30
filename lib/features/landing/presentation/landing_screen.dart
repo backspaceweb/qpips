@@ -5,12 +5,22 @@ import '../../../design/app_typography.dart';
 import '../../../design/widgets/eyebrow.dart';
 import '../../../design/widgets/fade_in_on_scroll.dart';
 import '../../../design/widgets/section_container.dart';
-import 'widgets/landing_nav_bar.dart';
+import 'widgets/landing_features.dart';
 import 'widgets/landing_hero.dart';
+import 'widgets/landing_how_it_works.dart';
+import 'widgets/landing_nav_bar.dart';
+import 'widgets/landing_stats.dart';
 import 'widgets/landing_trust_strip.dart';
 
-/// Public landing page. Composes nav + hero + trust strip + (more sections
-/// to follow). All sections live in `widgets/` for clarity.
+/// Public landing page. Composes nav + hero + sections in order.
+///
+/// Sections, in scroll order:
+///   1. Dark gradient header  → nav + hero
+///   2. Trust strip           → 6 supported platforms
+///   3. How it works          → 3 numbered steps
+///   4. Features              → 3 alternating blocks (DISCOVER / COPY / MANAGE)
+///   5. Stats                 → quantified trust counter row (dark band)
+///   6. (Coming in D.3)       → Pricing · FAQ · Footer
 class LandingScreen extends StatelessWidget {
   const LandingScreen({super.key});
 
@@ -21,11 +31,11 @@ class LandingScreen extends StatelessWidget {
       body: SingleChildScrollView(
         child: Column(
           children: const [
-            // Top: dark hero region (nav + hero share the same gradient bg).
             _DarkHeader(),
             LandingTrustStrip(),
-            // Stub for sections we'll add next:
-            //   How it works · Features · Stats · Pricing · FAQ · Footer
+            LandingHowItWorks(),
+            LandingFeatures(),
+            LandingStats(),
             _NextSectionsPlaceholder(),
           ],
         ),
@@ -57,21 +67,15 @@ class _NextSectionsPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SectionContainer(
-      backgroundColor: AppColors.surfaceMuted,
+      backgroundColor: AppColors.surface,
       child: const FadeInOnScroll(
         child: Column(
           children: [
             Eyebrow('Coming next'),
             SizedBox(height: AppSpacing.md),
             Text(
-              'How it works · Features · Stats · Pricing · FAQ · Footer',
+              'Pricing · FAQ · Footer',
               style: AppTypography.headlineSmall,
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: AppSpacing.sm),
-            Text(
-              'Hero + trust strip first. Tell me to refine before we build out below.',
-              style: AppTypography.bodyMedium,
               textAlign: TextAlign.center,
             ),
           ],
