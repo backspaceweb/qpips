@@ -32,6 +32,11 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+# Per-package build outputs after the D.4 workspace restructure
+packages/*/build/
+# Library-package lockfiles aren't meant to be checked in (consumers resolve)
+packages/core/pubspec.lock
+packages/design/pubspec.lock
 
 # Symbolication related
 app.*.symbols
@@ -48,3 +53,7 @@ app.*.map.json
 test_api_key.dart
 register_slave_script.dart
 api.json
+
+# Local credentials — never commit. Real values live here; secrets.example.json
+# is the committed template for new contributors.
+/secrets.json
