@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../../design/app_colors.dart';
-import '../../../design/app_spacing.dart';
-import '../../../design/app_typography.dart';
-import '../../../design/widgets/eyebrow.dart';
-import '../../../design/widgets/fade_in_on_scroll.dart';
-import '../../../design/widgets/section_container.dart';
+import 'widgets/landing_faq.dart';
 import 'widgets/landing_features.dart';
+import 'widgets/landing_footer.dart';
 import 'widgets/landing_hero.dart';
 import 'widgets/landing_how_it_works.dart';
 import 'widgets/landing_nav_bar.dart';
+import 'widgets/landing_pricing.dart';
 import 'widgets/landing_stats.dart';
 import 'widgets/landing_trust_strip.dart';
 
@@ -20,7 +18,9 @@ import 'widgets/landing_trust_strip.dart';
 ///   3. How it works          → 3 numbered steps
 ///   4. Features              → 3 alternating blocks (DISCOVER / COPY / MANAGE)
 ///   5. Stats                 → quantified trust counter row (dark band)
-///   6. (Coming in D.3)       → Pricing · FAQ · Footer
+///   6. Pricing               → 3 tiers (Starter / Pro / Elite)
+///   7. FAQ                   → accordion
+///   8. Footer                → sitemap + store badges + social
 class LandingScreen extends StatelessWidget {
   const LandingScreen({super.key});
 
@@ -36,7 +36,9 @@ class LandingScreen extends StatelessWidget {
             LandingHowItWorks(),
             LandingFeatures(),
             LandingStats(),
-            _NextSectionsPlaceholder(),
+            LandingPricing(),
+            LandingFaq(),
+            LandingFooter(),
           ],
         ),
       ),
@@ -56,30 +58,6 @@ class _DarkHeader extends StatelessWidget {
           LandingNavBar(),
           LandingHero(),
         ],
-      ),
-    );
-  }
-}
-
-class _NextSectionsPlaceholder extends StatelessWidget {
-  const _NextSectionsPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return SectionContainer(
-      backgroundColor: AppColors.surface,
-      child: const FadeInOnScroll(
-        child: Column(
-          children: [
-            Eyebrow('Coming next'),
-            SizedBox(height: AppSpacing.md),
-            Text(
-              'Pricing · FAQ · Footer',
-              style: AppTypography.headlineSmall,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }
