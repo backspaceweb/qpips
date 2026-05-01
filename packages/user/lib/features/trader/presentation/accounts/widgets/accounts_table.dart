@@ -329,11 +329,15 @@ class _AccountRowState extends State<_AccountRow> {
   }
 
   void _openDetails() {
+    // Material 3 caps bottom-sheet width at 640px by default; override with
+    // an unbounded constraint so AccountDetailsSheet can size itself by
+    // its own logic (centered card on wide screens, full-width on phones).
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: AppColors.overlay,
+      constraints: const BoxConstraints(),
       builder: (_) => AccountDetailsSheet(account: _toAccount()),
     );
   }

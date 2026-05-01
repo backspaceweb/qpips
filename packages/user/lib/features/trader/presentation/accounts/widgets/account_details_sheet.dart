@@ -28,6 +28,14 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
   List<TradeOrder> _history = [];
   Timer? _historyTimer;
 
+  // Per-tab scroll controllers so horizontal + vertical Scrollbars can
+  // anchor onto the right inner scroll view. Without explicit controllers
+  // the always-visible scrollbar can't track which view it belongs to.
+  final _openHCtrl = ScrollController();
+  final _openVCtrl = ScrollController();
+  final _historyHCtrl = ScrollController();
+  final _historyVCtrl = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +49,10 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
   @override
   void dispose() {
     _historyTimer?.cancel();
+    _openHCtrl.dispose();
+    _openVCtrl.dispose();
+    _historyHCtrl.dispose();
+    _historyVCtrl.dispose();
     super.dispose();
   }
 
@@ -73,22 +85,52 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenH = MediaQuery.of(context).size.height;
+    final screenW = MediaQuery.of(context).size.width;
+    // Card-style on wide screens: cap width, round all four corners,
+    // float above the bottom edge so the page doesn't feel "consumed."
+    // On narrow screens (<900px) fall back to a full-width sheet docked
+    // to the bottom — that's the right shape on phones/tablets.
+    final isWide = screenW >= 900;
+    // Modal-card width: proportional to screen, clamped so it never feels
+    // cramped on a small laptop or lost on an ultrawide. 65% of screen
+    // hits a good "focused panel" feel.
+    final cardMaxWidth = (screenW * 0.65).clamp(880.0, 1180.0);
+    final bottomGap = isWide ? 64.0 : 0.0;
+    final sideGap = isWide ? 24.0 : 0.0;
+    final radius = isWide
+        ? BorderRadius.circular(24)
+        : const BorderRadius.vertical(top: Radius.circular(28));
 
     return Consumer<TraderLiveStateController>(
       builder: (context, ctrl, _) {
         final open = ctrl.openOrdersFor(widget.account.serverId);
-        return DefaultTabController(
-          length: 2,
-          child: Container(
-            height: screenH * 0.86,
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: Column(
-              children: [
-                _buildDragHandle(),
+        return Align(
+          alignment: Alignment.bottomCenter,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(sideGap, 0, sideGap, bottomGap),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: cardMaxWidth),
+              child: DefaultTabController(
+                length: 2,
+                child: Container(
+                  width: double.infinity,
+                  height: screenH * (isWide ? 0.78 : 0.9),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: radius,
+                    boxShadow: isWide
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.18),
+                              blurRadius: 32,
+                              offset: const Offset(0, 12),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Column(
+                    children: [
+                      _buildDragHandle(),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(28, 4, 16, 0),
                   child: _buildHeader(isDark, ctrl),
@@ -110,6 +152,8 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
                         isDark: isDark,
                         emptyText: 'No open orders right now.',
                         emptyIcon: Icons.trending_flat,
+                        hCtrl: _openHCtrl,
+                        vCtrl: _openVCtrl,
                       ),
                       _buildTabContent(
                         isOpenView: false,
@@ -118,14 +162,19 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
                         isDark: isDark,
                         emptyText: 'No closed trades in the last 7 days.',
                         emptyIcon: Icons.history_toggle_off,
+                        hCtrl: _historyHCtrl,
+                        vCtrl: _historyVCtrl,
                       ),
-                    ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        );
+          );
       },
     );
   }
@@ -310,6 +359,13 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     );
   }
 
+  // Shared column layout for header + body rows so they line up exactly.
+  // Flex weights add to ~95; at popup width 1100 each unit is ~11px.
+  static const _columnFlex = [14, 9, 7, 7, 9, 9, 9, 9, 11, 11];
+  static const _columnNumeric = [
+    false, false, false, true, true, true, true, true, true, false,
+  ];
+
   Widget _buildTabContent({
     required bool isOpenView,
     required List<TradeOrder> orders,
@@ -317,6 +373,8 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     required bool isDark,
     required String emptyText,
     required IconData emptyIcon,
+    required ScrollController hCtrl,
+    required ScrollController vCtrl,
   }) {
     if (loading) {
       return const Center(child: CircularProgressIndicator());
@@ -324,9 +382,54 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     if (orders.isEmpty) {
       return _buildEmpty(emptyText, emptyIcon);
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: _buildOrdersTable(orders, isOpenView: isOpenView, isDark: isDark),
+    // Header pinned outside the vertical scroll so it stays visible while
+    // body rows scroll. Header and body share `_columnFlex` so columns
+    // line up perfectly. On narrow screens (<900) we wrap in a horizontal
+    // scroll to keep columns from collapsing — header + body scroll
+    // together because they live in the same horizontal scroll view.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const minTableWidth = 900.0;
+          final needsHScroll = constraints.maxWidth < minTableWidth;
+          final tableWidth =
+              needsHScroll ? minTableWidth : constraints.maxWidth;
+
+          Widget pinnedTable = SizedBox(
+            width: tableWidth,
+            child: Column(
+              children: [
+                _buildHeaderRow(isOpenView, isDark),
+                Expanded(
+                  child: Scrollbar(
+                    controller: vCtrl,
+                    thumbVisibility: true,
+                    child: ListView.builder(
+                      controller: vCtrl,
+                      itemCount: orders.length,
+                      itemBuilder: (_, i) =>
+                          _buildBodyRow(orders[i], isOpenView, isDark),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+
+          if (!needsHScroll) return pinnedTable;
+          return Scrollbar(
+            controller: hCtrl,
+            thumbVisibility: true,
+            trackVisibility: true,
+            child: SingleChildScrollView(
+              controller: hCtrl,
+              scrollDirection: Axis.horizontal,
+              child: pinnedTable,
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -346,48 +449,126 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     );
   }
 
-  Widget _buildOrdersTable(List<TradeOrder> orders, {required bool isOpenView, required bool isDark}) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columnSpacing: 20,
-        headingRowColor: WidgetStateProperty.all(
-          isDark ? Colors.white.withValues(alpha: 0.04) : Colors.grey.withValues(alpha: 0.08),
+  Widget _buildHeaderRow(bool isOpenView, bool isDark) {
+    final headers = [
+      'Ticket', 'Symbol', 'Side', 'Lots', 'Open',
+      isOpenView ? 'Current' : 'Close', 'SL', 'TP', 'Profit', 'Time',
+    ];
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : Colors.grey.withValues(alpha: 0.08),
+        border: Border(
+          bottom: BorderSide(
+            color: isDark
+                ? Colors.white12
+                : Colors.black.withValues(alpha: 0.08),
+          ),
         ),
-        columns: [
-          const DataColumn(label: Text('Ticket')),
-          const DataColumn(label: Text('Symbol')),
-          const DataColumn(label: Text('Side')),
-          const DataColumn(label: Text('Lots'), numeric: true),
-          const DataColumn(label: Text('Open'), numeric: true),
-          DataColumn(label: Text(isOpenView ? 'Current' : 'Close'), numeric: true),
-          const DataColumn(label: Text('SL'), numeric: true),
-          const DataColumn(label: Text('TP'), numeric: true),
-          const DataColumn(label: Text('Profit'), numeric: true),
-          const DataColumn(label: Text('Time')),
-        ],
-        rows: orders.map((o) => DataRow(cells: [
-          DataCell(Text(o.ticket.toString(), style: const TextStyle(fontFamily: 'monospace'))),
-          DataCell(Text(o.symbol)),
-          DataCell(_sideChip(o)),
-          DataCell(Text(_fmtLots(o.lots))),
-          DataCell(Text(_fmtPrice(o.openPrice))),
-          DataCell(Text(_fmtPrice(o.closePrice))),
-          DataCell(Text(o.stopLoss == 0 ? '—' : _fmtPrice(o.stopLoss))),
-          DataCell(Text(o.takeProfit == 0 ? '—' : _fmtPrice(o.takeProfit))),
-          DataCell(Text(
-            _fmtMoney(o.profit),
-            style: TextStyle(
-              color: o.profit > 0
-                  ? Colors.green
-                  : o.profit < 0
-                      ? Colors.redAccent
-                      : null,
-              fontWeight: FontWeight.bold,
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < headers.length; i++)
+            _cell(
+              i,
+              Text(
+                headers[i],
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : Colors.grey.shade700,
+                  letterSpacing: 0.3,
+                ),
+              ),
             ),
-          )),
-          DataCell(Text(_fmtTime(isOpenView ? o.openTime : o.lastUpdateTime))),
-        ])).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBodyRow(TradeOrder o, bool isOpenView, bool isDark) {
+    const cellStyle = TextStyle(fontSize: 12.5);
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.05)
+                : Colors.black.withValues(alpha: 0.04),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          _cell(
+            0,
+            Text(
+              o.ticket.toString(),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+          _cell(1, Text(o.symbol, style: cellStyle)),
+          _cell(2, _sideChip(o)),
+          _cell(3, Text(_fmtLots(o.lots), style: cellStyle)),
+          _cell(4, Text(_fmtPrice(o.openPrice), style: cellStyle)),
+          _cell(5, Text(_fmtPrice(o.closePrice), style: cellStyle)),
+          _cell(
+            6,
+            Text(
+              o.stopLoss == 0 ? '—' : _fmtPrice(o.stopLoss),
+              style: cellStyle,
+            ),
+          ),
+          _cell(
+            7,
+            Text(
+              o.takeProfit == 0 ? '—' : _fmtPrice(o.takeProfit),
+              style: cellStyle,
+            ),
+          ),
+          _cell(
+            8,
+            Text(
+              _fmtMoney(o.profit),
+              style: TextStyle(
+                fontSize: 12.5,
+                color: o.profit > 0
+                    ? Colors.green
+                    : o.profit < 0
+                        ? Colors.redAccent
+                        : null,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          _cell(
+            9,
+            Text(
+              _fmtTime(isOpenView ? o.openTime : o.lastUpdateTime),
+              style: cellStyle,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cell(int idx, Widget child) {
+    return Expanded(
+      flex: _columnFlex[idx],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Align(
+          alignment: _columnNumeric[idx]
+              ? Alignment.centerRight
+              : Alignment.centerLeft,
+          child: child,
+        ),
       ),
     );
   }
