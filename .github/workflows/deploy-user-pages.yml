@@ -1,0 +1,79 @@
+name: Deploy user app to GitHub Pages
+
+# Builds packages/user as a Flutter web bundle and publishes it to
+# GitHub Pages. Supabase URL + anon key are injected from repo Secrets
+# at build time — secrets.json is gitignored and never reaches CI.
+#
+# Anon key is safe to ship in a public bundle (Postgres RLS is what
+# actually protects data), but routing the value through Secrets means
+# it can be rotated from one place without touching the repo.
+#
+# Site URL after first deploy:
+#   https://backspaceweb.github.io/qpips/
+#
+# After the first successful run:
+#   1. GitHub repo → Settings → Pages → Source = "GitHub Actions".
+#   2. Supabase dashboard → Authentication → URL Configuration →
+#      Site URL = https://backspaceweb.github.io/qpips
+#      (otherwise email-confirmation links land on localhost).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/user/**'
+      - 'packages/core/**'
+      - 'packages/design/**'
+      - '.github/workflows/deploy-user-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get (user package)
+        working-directory: packages/user
+        run: flutter pub get
+
+      - name: Build web bundle
+        working-directory: packages/user
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build web \
+            --release \
+            --base-href "/qpips/" \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/user/build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
