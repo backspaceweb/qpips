@@ -11,6 +11,7 @@ import 'package:qp_design/app_typography.dart';
 import 'package:qp_design/widgets/primary_button.dart';
 import '../accounts/widgets/slave_settings_dialog.dart';
 import '../profile/provider_profile_screen.dart';
+import '../tabs.dart';
 import 'widgets/follow_row.dart';
 import 'widgets/follows_summary.dart';
 
@@ -340,14 +341,7 @@ class _EmptyState extends StatelessWidget {
           PrimaryButton(
             label: 'Browse providers',
             onPressed: () {
-              // TraderShell holds tab state in setState — for D.5 we
-              // surface a hint rather than wire a cross-tab jump.
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Switch to the Discover tab on the left.'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
+              context.read<TraderTabController>().setTab(TraderTab.discover);
             },
           ),
         ],

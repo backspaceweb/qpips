@@ -31,7 +31,7 @@ class TraderShell extends StatefulWidget {
 }
 
 class _TraderShellState extends State<TraderShell> {
-  TraderTab _active = TraderTab.discover;
+  final TraderTabController _tabCtrl = TraderTabController();
 
   @override
   void initState() {
@@ -44,6 +44,12 @@ class _TraderShellState extends State<TraderShell> {
       if (!mounted) return;
       context.read<TraderLiveStateController>().initialize();
     });
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    super.dispose();
   }
 
   Widget _bodyFor(TraderTab tab) {
@@ -65,13 +71,23 @@ class _TraderShellState extends State<TraderShell> {
 
   @override
   Widget build(BuildContext context) {
+    return ChangeNotifierProvider<TraderTabController>.value(
+      value: _tabCtrl,
+      child: ListenableBuilder(
+        listenable: _tabCtrl,
+        builder: (context, _) => _buildShell(context, _tabCtrl.active),
+      ),
+    );
+  }
+
+  Widget _buildShell(BuildContext context, TraderTab active) {
     final width = MediaQuery.of(context).size.width;
     final isDesktop = width >= AppSpacing.desktopMin;
 
     final body = Column(
       children: [
         const DemoDataBanner(),
-        Expanded(child: _bodyFor(_active)),
+        Expanded(child: _bodyFor(active)),
       ],
     );
 
@@ -80,10 +96,7 @@ class _TraderShellState extends State<TraderShell> {
         backgroundColor: AppColors.surfaceMuted,
         body: Row(
           children: [
-            _Sidebar(
-              active: _active,
-              onSelect: (t) => setState(() => _active = t),
-            ),
+            _Sidebar(active: active, onSelect: _tabCtrl.setTab),
             Expanded(child: body),
           ],
         ),
@@ -94,8 +107,8 @@ class _TraderShellState extends State<TraderShell> {
       backgroundColor: AppColors.surfaceMuted,
       body: SafeArea(child: body),
       bottomNavigationBar: _BottomTabs(
-        active: _active,
-        onSelect: (t) => setState(() => _active = t),
+        active: active,
+        onSelect: _tabCtrl.setTab,
       ),
     );
   }

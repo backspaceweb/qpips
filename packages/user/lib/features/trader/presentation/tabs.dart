@@ -28,3 +28,22 @@ enum TraderTab {
   final IconData activeIcon;
   const TraderTab(this.label, this.icon, this.activeIcon);
 }
+
+/// Holds + broadcasts the active trader tab so descendants can request
+/// cross-tab jumps (e.g. the "Browse providers" CTA on My Follows' empty
+/// state needs to flip the shell to the Discover tab).
+///
+/// Owned by `TraderShell` and provided to its subtree. Phase E will
+/// likely retire this in favour of go_router URLs — at that point the
+/// callers can switch to `Navigator.of(context).pushNamed('/discover')`
+/// without touching this controller's API.
+class TraderTabController extends ChangeNotifier {
+  TraderTab _active = TraderTab.discover;
+  TraderTab get active => _active;
+
+  void setTab(TraderTab tab) {
+    if (_active == tab) return;
+    _active = tab;
+    notifyListeners();
+  }
+}
