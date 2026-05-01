@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/domain/account.dart';
 import 'package:qp_core/domain/account_ownership.dart';
+import 'package:qp_core/domain/provider_listing.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
@@ -9,6 +10,7 @@ import 'package:qp_design/app_typography.dart';
 
 import 'account_details_sheet.dart';
 import 'account_edit_dialog.dart';
+import 'provider_application_dialog.dart';
 import 'slave_settings_dialog.dart';
 import 'switch_master_dialog.dart';
 
@@ -22,6 +24,7 @@ import 'switch_master_dialog.dart';
 class AccountsTable extends StatelessWidget {
   final List<AccountOwnership> accounts;
   final List<AccountOwnership> allAccounts;
+  final Map<int, ProviderListing> listingsByMaster;
   final String search;
   final Platform? platformFilter;
   final ValueChanged<String> onSearchChanged;
@@ -34,6 +37,7 @@ class AccountsTable extends StatelessWidget {
     super.key,
     required this.accounts,
     required this.allAccounts,
+    required this.listingsByMaster,
     required this.search,
     required this.platformFilter,
     required this.onSearchChanged,
@@ -80,6 +84,7 @@ class AccountsTable extends StatelessWidget {
             _Table(
               accounts: accounts,
               allAccounts: allAccounts,
+              listingsByMaster: listingsByMaster,
               onAccountChanged: onAccountChanged,
             ),
         ],
@@ -207,11 +212,13 @@ class _FilterRow extends StatelessWidget {
 class _Table extends StatelessWidget {
   final List<AccountOwnership> accounts;
   final List<AccountOwnership> allAccounts;
+  final Map<int, ProviderListing> listingsByMaster;
   final VoidCallback onAccountChanged;
 
   const _Table({
     required this.accounts,
     required this.allAccounts,
+    required this.listingsByMaster,
     required this.onAccountChanged,
   });
 
@@ -225,6 +232,7 @@ class _Table extends StatelessWidget {
           _AccountRow(
             account: accounts[i],
             allAccounts: allAccounts,
+            listing: listingsByMaster[accounts[i].tradingAccountId],
             onChanged: onAccountChanged,
           ),
           if (i != accounts.length - 1)
@@ -254,7 +262,7 @@ class _HeaderRow extends StatelessWidget {
           Expanded(flex: 2, child: Text('BALANCE', style: style)),
           Expanded(flex: 2, child: Text('CONNECTION', style: style)),
           Expanded(flex: 2, child: Text('STATUS', style: style)),
-          SizedBox(width: 260, child: Text('ACTIONS', style: style)),
+          SizedBox(width: 300, child: Text('ACTIONS', style: style)),
         ],
       ),
     );
@@ -264,10 +272,12 @@ class _HeaderRow extends StatelessWidget {
 class _AccountRow extends StatefulWidget {
   final AccountOwnership account;
   final List<AccountOwnership> allAccounts;
+  final ProviderListing? listing;
   final VoidCallback onChanged;
   const _AccountRow({
     required this.account,
     required this.allAccounts,
+    required this.listing,
     required this.onChanged,
   });
 
@@ -327,6 +337,18 @@ class _AccountRowState extends State<_AccountRow> {
         slave: widget.account,
         ownedAccounts: widget.allAccounts,
         onSwitched: widget.onChanged,
+      ),
+    );
+  }
+
+  void _openProviderApplication() {
+    showDialog<void>(
+      context: context,
+      barrierColor: AppColors.overlay,
+      builder: (_) => ProviderApplicationDialog(
+        master: widget.account,
+        existing: widget.listing,
+        onSaved: widget.onChanged,
       ),
     );
   }
@@ -454,7 +476,15 @@ class _AccountRowState extends State<_AccountRow> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                _TypePill(type: acc.accountType),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    _TypePill(type: acc.accountType),
+                    if (widget.listing != null)
+                      _ListingStatusPill(status: widget.listing!.status),
+                  ],
+                ),
               ],
             ),
           ),
@@ -498,7 +528,7 @@ class _AccountRowState extends State<_AccountRow> {
             child: _StatusPill(disabled: acc.mirroringDisabled),
           ),
           SizedBox(
-            width: 260,
+            width: 300,
             child: _deleting
                 ? const Center(
                     child: SizedBox(
@@ -559,6 +589,21 @@ class _AccountRowState extends State<_AccountRow> {
                               ? _openSwitchMaster
                               : null,
                           tooltip: 'Switch master',
+                        ),
+                      // Apply as Provider — masters only. Opens the
+                      // application dialog (handles new + edit +
+                      // resubmit-after-rejection inside).
+                      if (acc.accountType == AccountType.master)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.storefront_outlined,
+                            size: 18,
+                          ),
+                          color: AppColors.textMuted,
+                          onPressed: _openProviderApplication,
+                          tooltip: widget.listing == null
+                              ? 'Apply as provider'
+                              : 'Manage provider listing',
                         ),
                       // Pause/Resume — flips mirroring on the trading
                       // API + DB. MT4/MT5 only; greyed out for other
@@ -635,6 +680,35 @@ class _EditButton extends StatelessWidget {
       tooltip: platformSupported
           ? 'Edit account'
           : 'Edit not available on this platform yet',
+    );
+  }
+}
+
+class _ListingStatusPill extends StatelessWidget {
+  final ProviderListingStatus status;
+  const _ListingStatusPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (status) {
+      ProviderListingStatus.pending => AppColors.warning,
+      ProviderListingStatus.approved => AppColors.profit,
+      ProviderListingStatus.rejected => AppColors.loss,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+      ),
+      child: Text(
+        status.label,
+        style: AppTypography.labelSmall.copyWith(
+          color: color,
+          fontSize: 9,
+          letterSpacing: 0.5,
+        ),
+      ),
     );
   }
 }

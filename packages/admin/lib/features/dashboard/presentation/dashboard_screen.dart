@@ -9,6 +9,7 @@ import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_colors.dart';
 
 import '../../plans/presentation/plans_screen.dart';
+import '../../provider_reviews/presentation/provider_reviews_screen.dart';
 import '../../wallets/presentation/wallets_screen.dart';
 import 'widgets/price_ticker.dart';
 
@@ -173,6 +174,17 @@ class _DashboardScreenState extends State<DashboardScreen>
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const PlansScreen(),
+              ),
+            ),
+          ),
+          _buildNavItem(
+            Icons.verified_outlined,
+            'Provider Reviews',
+            false,
+            primary,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const ProviderReviewsScreen(),
               ),
             ),
           ),

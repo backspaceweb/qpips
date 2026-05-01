@@ -13,11 +13,12 @@ import 'features/trader/presentation/trader_shell.dart';
 
 /// QuantumPips trader app.
 ///
-/// 1A wires Supabase Auth + the WalletRepository in. The trader app
-/// still uses the mock SignalDirectoryRepository + TraderRepository for
-/// the Discover / My Follows surfaces (Phase E swaps those for real
-/// Supabase-backed implementations). Auth is real today: visiting
-/// `/app` redirects to `/login` until a Supabase session exists.
+/// Auth + Wallet + Subscriptions + Accounts run against real Supabase
+/// today. Phase E E.1.3 wired the Discover surface to a real
+/// SupabaseSignalDirectoryRepository (joins provider_listings + account
+/// _ownership for approved listings). My Follows still uses the mock
+/// TraderRepository — that swap waits for the follow_intents schema
+/// (separate slice).
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -47,10 +48,11 @@ class UserApp extends StatelessWidget {
         // TradingRepository, AuthRepository, WalletRepository,
         // SubscriptionRepository, AccountRepository.
         ...ApiClientProvider.providers,
-        // Mock-only repositories for Discover / My Follows. Phase E
-        // swaps these for Supabase-backed implementations.
+        // Discover surface: real provider_listings join (E.1.3).
+        // My Follows: still mock until follow_intents schema lands.
         Provider<SignalDirectoryRepository>(
-          create: (_) => MockSignalDirectoryRepository(),
+          create: (_) =>
+              SupabaseSignalDirectoryRepository(Supabase.instance.client),
         ),
         Provider<TraderRepository>(
           create: (_) => MockTraderRepository(),

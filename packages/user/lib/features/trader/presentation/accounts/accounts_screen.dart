@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/domain/account.dart';
 import 'package:qp_core/domain/account_ownership.dart';
+import 'package:qp_core/domain/provider_listing.dart';
 import 'package:qp_core/repositories/account_repository.dart';
+import 'package:qp_core/repositories/provider_listing_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
@@ -45,13 +47,19 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
   Future<_AccountsData> _load() async {
     final repo = context.read<AccountRepository>();
+    final providerRepo = context.read<ProviderListingRepository>();
     final results = await Future.wait([
       repo.listMyAccounts(),
       repo.getMySlotUsage(),
+      providerRepo.listMine(),
     ]);
+    final listings = results[2] as List<ProviderListing>;
     return _AccountsData(
       accounts: results[0] as List<AccountOwnership>,
       usage: results[1] as SlotUsage,
+      listingsByMaster: {
+        for (final l in listings) l.masterAccountId: l,
+      },
     );
   }
 
@@ -151,6 +159,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 AccountsTable(
                   accounts: visible,
                   allAccounts: data.accounts,
+                  listingsByMaster: data.listingsByMaster,
                   search: _search,
                   platformFilter: _platformFilter,
                   onSearchChanged: (s) => setState(() => _search = s),
@@ -170,7 +179,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
 class _AccountsData {
   final List<AccountOwnership> accounts;
   final SlotUsage usage;
-  const _AccountsData({required this.accounts, required this.usage});
+  final Map<int, ProviderListing> listingsByMaster;
+  const _AccountsData({
+    required this.accounts,
+    required this.usage,
+    required this.listingsByMaster,
+  });
 }
 
 class _Header extends StatelessWidget {
