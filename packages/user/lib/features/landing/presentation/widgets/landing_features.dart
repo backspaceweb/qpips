@@ -226,7 +226,7 @@ class _FeatureText extends StatelessWidget {
           label: ctaLabel,
           icon: Icons.arrow_forward,
           onPressed: () =>
-              Navigator.of(context).pushNamed('/app'),
+              Navigator.of(context).pushNamed('/signup'),
         ),
       ],
     );

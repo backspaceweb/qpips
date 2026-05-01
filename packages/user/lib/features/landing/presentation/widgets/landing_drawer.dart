@@ -46,7 +46,7 @@ class LandingDrawer extends StatelessWidget {
                   _LoginRow(
                     onTap: () {
                       Navigator.of(context).pop();
-                      Navigator.of(context).pushNamed('/registration');
+                      Navigator.of(context).pushNamed('/login');
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -54,7 +54,7 @@ class LandingDrawer extends StatelessWidget {
                     label: 'Get Started',
                     onPressed: () {
                       Navigator.of(context).pop();
-                      Navigator.of(context).pushNamed('/app');
+                      Navigator.of(context).pushNamed('/signup');
                     },
                   ),
                 ],

@@ -7,6 +7,7 @@ import 'package:qp_core/repositories/trader_repository.dart';
 import 'package:qp_design/app_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'features/auth/presentation/trader_login_screen.dart';
+import 'features/auth/presentation/trader_sign_up_screen.dart';
 import 'features/landing/presentation/landing_screen.dart';
 import 'features/trader/presentation/trader_shell.dart';
 
@@ -64,8 +65,12 @@ class UserApp extends StatelessWidget {
         routes: {
           '/': (context) => const LandingScreen(),
           '/login': (context) => const TraderLoginScreen(),
+          '/signup': (context) => const TraderSignUpScreen(),
+          // Back-compat: landing-page links that still point at
+          // /registration land on sign-up rather than login (the
+          // original placeholder semantics).
+          '/registration': (context) => const TraderSignUpScreen(),
           '/app': (context) => const _AuthGate(child: TraderShell()),
-          '/registration': (context) => const TraderLoginScreen(),
         },
       ),
     );

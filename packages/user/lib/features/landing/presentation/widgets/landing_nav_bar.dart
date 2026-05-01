@@ -43,13 +43,13 @@ class LandingNavBar extends StatelessWidget {
               if (!isCompact) ...[
                 _LoginLink(
                   onTap: () =>
-                      Navigator.of(context).pushNamed('/registration'),
+                      Navigator.of(context).pushNamed('/login'),
                 ),
                 const SizedBox(width: AppSpacing.lg),
                 PrimaryButton(
                   label: 'Get Started',
                   onPressed: () =>
-                      Navigator.of(context).pushNamed('/app'),
+                      Navigator.of(context).pushNamed('/signup'),
                 ),
               ] else
                 Builder(

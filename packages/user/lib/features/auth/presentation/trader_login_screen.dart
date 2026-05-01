@@ -8,12 +8,10 @@ import 'package:qp_design/widgets/primary_button.dart';
 
 /// Trader sign-in screen.
 ///
-/// 1A scope: log-in only. Sign-up flow ships in a later slice; for now
-/// Susanto creates trader accounts manually via Supabase Dashboard
-/// (Authentication → Users → Add user). The trigger auto-creates a
-/// profile + wallet for each new auth.users row.
-///
-/// On success, replaces route with `/app` (TraderShell).
+/// On success, replaces route with `/app` (TraderShell). Traders without
+/// an account use the "Sign up" link below the form to land on
+/// /signup. The `handle_new_user` trigger auto-creates a profile +
+/// wallet for each new auth.users row.
 class TraderLoginScreen extends StatefulWidget {
   const TraderLoginScreen({super.key});
 
@@ -143,6 +141,20 @@ class _TraderLoginScreenState extends State<TraderLoginScreen> {
                       large: true,
                     ),
                     const SizedBox(height: AppSpacing.lg),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          "Don't have an account?",
+                          style: AppTypography.bodySmall,
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context)
+                              .pushReplacementNamed('/signup'),
+                          child: const Text('Sign up'),
+                        ),
+                      ],
+                    ),
                     TextButton(
                       onPressed: () =>
                           Navigator.of(context).pushReplacementNamed('/'),

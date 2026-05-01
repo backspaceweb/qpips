@@ -5,7 +5,7 @@ import 'package:qp_design/app_typography.dart';
 
 /// Floating "Start free →" pill anchored to the bottom of the landing
 /// page on mobile. Always visible while the trader scrolls; dismisses
-/// the keyboard if open and routes to /app on tap.
+/// the keyboard if open and routes to /signup on tap.
 ///
 /// Hidden on desktop — there the inline hero / nav / pricing CTAs are
 /// already always reachable. On mobile, hero CTAs scroll out of view
@@ -45,7 +45,7 @@ class LandingStickyCta extends StatelessWidget {
               ],
             ),
             child: InkWell(
-              onTap: () => Navigator.of(context).pushNamed('/app'),
+              onTap: () => Navigator.of(context).pushNamed('/signup'),
               borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
               child: Container(
                 height: 52,

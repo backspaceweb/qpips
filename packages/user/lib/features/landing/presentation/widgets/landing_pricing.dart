@@ -267,12 +267,12 @@ class _PricingCard extends StatelessWidget {
                     ? PrimaryButton(
                         label: tier.ctaLabel,
                         onPressed: () =>
-                            Navigator.of(context).pushNamed('/app'),
+                            Navigator.of(context).pushNamed('/signup'),
                       )
                     : SecondaryButton(
                         label: tier.ctaLabel,
                         onPressed: () =>
-                            Navigator.of(context).pushNamed('/app'),
+                            Navigator.of(context).pushNamed('/signup'),
                       ),
               ),
             ],
