@@ -11,9 +11,18 @@ import 'account.dart';
 /// `master_listings` (public flag + display metadata) with the trading
 /// server's account state.
 class MasterListing {
-  /// Stable identifier — maps to the trading-server account ID. Stored as
-  /// String so forward-compat with non-numeric IDs is free.
+  /// Stable identifier — for real listings this is provider_listings.id
+  /// (uuid); for mock entries it's a 'mock-NNN' string. Stored as
+  /// String so the directory abstraction stays simple.
   final String id;
+
+  /// Trading API serverId of the master this listing represents. Real
+  /// listings always populate this from
+  /// `provider_listings.master_account_id`; mock entries leave it null.
+  /// Used by surfaces that need to cross-reference the master against
+  /// `account_ownership` rows (e.g. the profile-aware-of-follows chip
+  /// matches it against `following_master_id` on slaves).
+  final int? masterAccountId;
 
   /// Marketing-facing display name (e.g. "Aurora Gold Trend"). NEVER the
   /// broker login number — that stays operator-internal.
@@ -61,6 +70,7 @@ class MasterListing {
 
   const MasterListing({
     required this.id,
+    this.masterAccountId,
     required this.displayName,
     this.avatarUrl,
     required this.tagline,

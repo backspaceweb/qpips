@@ -15,7 +15,19 @@ import 'master_listing.dart';
 class ActiveFollow {
   // ---- Identity ----
   final String slaveAccountId;
+
+  /// Trading API's serverId for the master this slave is bound to.
+  /// Null on legacy mock data (the mock keys masters by listing-id
+  /// strings); the real repository always sets this so cross-surface
+  /// lookups (Provider Profile chip etc) can match against the
+  /// master's account_ownership row.
+  final int? masterAccountId;
+
+  /// String identifier of the master in whatever directory surface
+  /// surfaced the follow — for the real repo this matches the
+  /// provider_listings.id (uuid); for the mock, the 'mock-NNN' id.
   final String masterId;
+
   final DateTime createdAt;
 
   // ---- Slave snapshot ----
@@ -50,6 +62,7 @@ class ActiveFollow {
   const ActiveFollow({
     required this.slaveAccountId,
     required this.masterId,
+    this.masterAccountId,
     required this.createdAt,
     required this.slaveDisplayName,
     required this.slavePlatform,
@@ -70,6 +83,7 @@ class ActiveFollow {
     return ActiveFollow(
       slaveAccountId: slaveAccountId,
       masterId: masterId,
+      masterAccountId: masterAccountId,
       createdAt: createdAt,
       slaveDisplayName: slaveDisplayName,
       slavePlatform: slavePlatform,

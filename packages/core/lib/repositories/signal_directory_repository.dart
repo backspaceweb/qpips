@@ -547,6 +547,7 @@ class SupabaseSignalDirectoryRepository implements SignalDirectoryRepository {
     final id = row['id'] as String;
     return MasterListing(
       id: id,
+      masterAccountId: (row['master_account_id'] as num?)?.toInt(),
       displayName: row['display_name'] as String? ?? 'Unnamed',
       tagline: (row['bio'] as String?)?.trim().isNotEmpty == true
           ? (row['bio'] as String)

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:qp_core/domain/active_follow.dart';
 import 'package:qp_core/domain/master_listing.dart';
 import 'package:qp_core/domain/provider_profile.dart';
 import 'package:qp_core/repositories/signal_directory_repository.dart';
+import 'package:qp_core/repositories/trader_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
@@ -42,7 +44,7 @@ class ProviderProfileScreen extends StatefulWidget {
 
 class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   TimeWindow _window = TimeWindow.month;
-  late Future<ProviderProfile> _future;
+  late Future<_ProfileLoad> _future;
 
   @override
   void initState() {
@@ -50,11 +52,23 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     _future = _load();
   }
 
-  Future<ProviderProfile> _load() {
-    return context.read<SignalDirectoryRepository>().getProvider(
-          widget.providerId,
-          window: _window,
-        );
+  /// Loads the profile + counts how many of the trader's slaves are
+  /// currently following this master. The count drives the
+  /// "Following with N slave(s)" chip below the Follow CTA.
+  Future<_ProfileLoad> _load() async {
+    final dir = context.read<SignalDirectoryRepository>();
+    final trader = context.read<TraderRepository>();
+    final results = await Future.wait([
+      dir.getProvider(widget.providerId, window: _window),
+      trader.listActiveFollows(),
+    ]);
+    final profile = results[0] as ProviderProfile;
+    final follows = results[1] as List<ActiveFollow>;
+    final masterId = profile.summary.masterAccountId;
+    final existing = masterId == null
+        ? 0
+        : follows.where((f) => f.masterAccountId == masterId).length;
+    return _ProfileLoad(profile: profile, existingFollowsCount: existing);
   }
 
   void _changeWindow(TimeWindow w) {
@@ -73,7 +87,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.surfaceMuted,
-      body: FutureBuilder<ProviderProfile>(
+      body: FutureBuilder<_ProfileLoad>(
         future: _future,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -85,12 +99,13 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               onBack: () => Navigator.of(context).pop(),
             );
           }
-          final profile = snap.data!;
+          final load = snap.data!;
           return _ProfileBody(
-            profile: profile,
+            profile: load.profile,
+            existingFollowsCount: load.existingFollowsCount,
             window: _window,
             onWindowChanged: _changeWindow,
-            onFollow: () => _openFollow(profile.summary),
+            onFollow: () => _openFollow(load.profile.summary),
             onBack: () => Navigator.of(context).pop(),
           );
         },
@@ -99,8 +114,18 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   }
 }
 
+class _ProfileLoad {
+  final ProviderProfile profile;
+  final int existingFollowsCount;
+  const _ProfileLoad({
+    required this.profile,
+    required this.existingFollowsCount,
+  });
+}
+
 class _ProfileBody extends StatelessWidget {
   final ProviderProfile profile;
+  final int existingFollowsCount;
   final TimeWindow window;
   final ValueChanged<TimeWindow> onWindowChanged;
   final VoidCallback onFollow;
@@ -108,6 +133,7 @@ class _ProfileBody extends StatelessWidget {
 
   const _ProfileBody({
     required this.profile,
+    required this.existingFollowsCount,
     required this.window,
     required this.onWindowChanged,
     required this.onFollow,
@@ -139,6 +165,7 @@ class _ProfileBody extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           ProfileHeader(
             listing: profile.summary,
+            existingFollowsCount: existingFollowsCount,
             onFollow: onFollow,
           ),
           const SizedBox(height: AppSpacing.xxl),

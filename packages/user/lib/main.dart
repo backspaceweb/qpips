@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:qp_core/api/api_client_provider.dart';
 import 'package:qp_core/repositories/signal_directory_repository.dart';
 import 'package:qp_core/repositories/trader_repository.dart';
+import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'features/auth/presentation/trader_login_screen.dart';
@@ -15,10 +16,11 @@ import 'features/trader/presentation/trader_shell.dart';
 ///
 /// Auth + Wallet + Subscriptions + Accounts run against real Supabase
 /// today. Phase E E.1.3 wired the Discover surface to a real
-/// SupabaseSignalDirectoryRepository (joins provider_listings + account
-/// _ownership for approved listings). My Follows still uses the mock
-/// TraderRepository — that swap waits for the follow_intents schema
-/// (separate slice).
+/// SupabaseSignalDirectoryRepository; E.2.1 wired the My Follows /
+/// Configure Follow / Provider Profile path to a real
+/// SupabaseTraderRepository that joins account_ownership with
+/// provider_listings. Live P&L and trade-history aggregation still
+/// pending — that's the live-performance follow-up slice.
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -49,13 +51,18 @@ class UserApp extends StatelessWidget {
         // SubscriptionRepository, AccountRepository.
         ...ApiClientProvider.providers,
         // Discover surface: real provider_listings join (E.1.3).
-        // My Follows: still mock until follow_intents schema lands.
         Provider<SignalDirectoryRepository>(
           create: (_) =>
               SupabaseSignalDirectoryRepository(Supabase.instance.client),
         ),
-        Provider<TraderRepository>(
-          create: (_) => MockTraderRepository(),
+        // My Follows / Configure Follow / Profile: real Supabase reads
+        // (E.2.1). Live P&L / openTrades stay zero until the live-perf
+        // slice ships.
+        ProxyProvider<TradingRepository, TraderRepository>(
+          update: (_, trading, __) => SupabaseTraderRepository(
+            Supabase.instance.client,
+            trading,
+          ),
         ),
       ],
       child: MaterialApp(

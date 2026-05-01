@@ -18,11 +18,19 @@ import 'package:qp_design/widgets/primary_button.dart';
 /// everything stacks.
 class ProfileHeader extends StatelessWidget {
   final MasterListing listing;
+
+  /// Number of the trader's slaves currently following this master.
+  /// > 0 surfaces a "Following with N slave(s)" chip below the CTA;
+  /// CTA stays clickable since one master can be followed by multiple
+  /// slaves (per spec). 0 hides the chip entirely.
+  final int existingFollowsCount;
+
   final VoidCallback onFollow;
 
   const ProfileHeader({
     super.key,
     required this.listing,
+    this.existingFollowsCount = 0,
     required this.onFollow,
   });
 
@@ -100,6 +108,10 @@ class ProfileHeader extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.lg),
         PrimaryButton(label: 'Follow this provider', onPressed: onFollow),
+        if (existingFollowsCount > 0) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _FollowingChip(count: existingFollowsCount),
+        ],
         const SizedBox(height: AppSpacing.sm),
         Text(
           'Min deposit ${_money(listing.minDeposit, listing.currency)}',
@@ -314,6 +326,40 @@ class _MetaItem extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _FollowingChip extends StatelessWidget {
+  final int count;
+  const _FollowingChip({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = count == 1 ? 'Following with 1 slave' : 'Following with $count slaves';
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.profit.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle, size: 14, color: AppColors.profit),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: AppTypography.labelSmall.copyWith(
+              color: AppColors.profit,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

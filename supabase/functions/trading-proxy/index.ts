@@ -330,6 +330,15 @@ Deno.serve(async (req) => {
           SUPABASE_SERVICE_ROLE_KEY,
         );
         const displayName = url.searchParams.get("comment") || null;
+        // Slave registers carry a masterId query param — store it so
+        // My Follows + Provider Profile can join slaves with their
+        // master without round-tripping the trading API.
+        let followingMasterId: number | null = null;
+        if (registerMatch.accountType === "slave") {
+          const masterIdParam = url.searchParams.get("masterId") ?? "";
+          const n = Number(masterIdParam);
+          if (Number.isFinite(n) && n > 0) followingMasterId = n;
+        }
         const { error: insertErr } = await adminClient
           .from("account_ownership")
           .insert({
@@ -339,6 +348,7 @@ Deno.serve(async (req) => {
             platform: registerMatch.platform,
             account_type: registerMatch.accountType,
             display_name: displayName,
+            following_master_id: followingMasterId,
           });
         if (insertErr) {
           console.error(
