@@ -1,11 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:qp_core/repositories/auth_repository.dart';
+import 'package:qp_core/api/api_client_provider.dart';
 import 'package:qp_core/repositories/signal_directory_repository.dart';
-import 'package:qp_core/repositories/subscription_repository.dart';
 import 'package:qp_core/repositories/trader_repository.dart';
-import 'package:qp_core/repositories/wallet_repository.dart';
 import 'package:qp_design/app_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'features/auth/presentation/trader_login_screen.dart';
@@ -44,21 +42,17 @@ class UserApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        // Real repositories shared with the admin app: Api (Chopper),
+        // TradingRepository, AuthRepository, WalletRepository,
+        // SubscriptionRepository, AccountRepository.
+        ...ApiClientProvider.providers,
+        // Mock-only repositories for Discover / My Follows. Phase E
+        // swaps these for Supabase-backed implementations.
         Provider<SignalDirectoryRepository>(
           create: (_) => MockSignalDirectoryRepository(),
         ),
         Provider<TraderRepository>(
           create: (_) => MockTraderRepository(),
-        ),
-        Provider<AuthRepository>(
-          create: (_) => AuthRepository(),
-        ),
-        Provider<WalletRepository>(
-          create: (_) => SupabaseWalletRepository(Supabase.instance.client),
-        ),
-        Provider<SubscriptionRepository>(
-          create: (_) =>
-              SupabaseSubscriptionRepository(Supabase.instance.client),
         ),
       ],
       child: MaterialApp(

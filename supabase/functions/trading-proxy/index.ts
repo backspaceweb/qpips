@@ -1,9 +1,16 @@
 // Edge Function: trading-proxy
 //
-// Forwards QuantumPips admin-panel requests to the tradecopy.online
-// trading API, injecting the X-API-KEY header server-side so the key
-// never ships in the Flutter bundle. Requires an authenticated
-// Supabase session — anon callers are rejected with 401.
+// Forwards QuantumPips requests to the tradecopy.online trading API,
+// injecting the X-API-KEY header server-side so the key never ships in
+// the Flutter bundle. Requires an authenticated Supabase session — anon
+// callers are rejected with 401.
+//
+// Slice B.1 additions:
+//   * Slot-quota gate on register endpoints — refuses 403 if the
+//     trader's subscription quota is exhausted before the upstream
+//     fetch fires.
+//   * Ownership write on successful register response (POST 2xx).
+//   * Ownership delete on successful delete response (DELETE 2xx).
 //
 // Path scheme:
 //   Client  →  https://<proj>.supabase.co/functions/v1/trading-proxy/api/v1/<endpoint>
@@ -18,6 +25,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const TRADING_API_BASE = "http://us-2-server.tradecopy.online:3310";
 const TRADING_API_KEY = Deno.env.get("TRADING_API_KEY") ?? "";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const SUPABASE_SERVICE_ROLE_KEY =
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -35,6 +46,78 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
+// Maps a register-endpoint path → (platform, account_type). Returns null
+// for non-register paths. Path matching is case-sensitive to mirror the
+// trading-API team's quirky naming (mt5 endpoints are PascalCase, mt4
+// snake_case, etc).
+type RegisterMatch = {
+  platform:
+    | "mt4"
+    | "mt5"
+    | "ctrader"
+    | "dxtrade"
+    | "tradelocker"
+    | "matchtrade";
+  accountType: "master" | "slave";
+};
+
+function matchRegister(path: string): RegisterMatch | null {
+  // MT4
+  if (path === "/api/v1/register_master_mt4") {
+    return { platform: "mt4", accountType: "master" };
+  }
+  if (path === "/api/v1/register_slave_mt4") {
+    return { platform: "mt4", accountType: "slave" };
+  }
+  // MT5
+  if (path === "/api/v1/RegisterMasterForMT5") {
+    return { platform: "mt5", accountType: "master" };
+  }
+  if (path === "/api/v1/RegisterSlaveForMT5") {
+    return { platform: "mt5", accountType: "slave" };
+  }
+  // Other platforms — not in B.1 scope but we recognise the paths so
+  // the gate engages once the trader app supports them.
+  if (path === "/api/v1/register_master_ctrader") {
+    return { platform: "ctrader", accountType: "master" };
+  }
+  if (path === "/api/v1/register_slave_ctrader") {
+    return { platform: "ctrader", accountType: "slave" };
+  }
+  if (path === "/api/v1/register_master_DxTrade") {
+    return { platform: "dxtrade", accountType: "master" };
+  }
+  if (path === "/api/v1/register_slave_dxTrade") {
+    return { platform: "dxtrade", accountType: "slave" };
+  }
+  if (path === "/api/v1/register_master_tradeLocker") {
+    return { platform: "tradelocker", accountType: "master" };
+  }
+  if (path === "/api/v1/register_slave_tradeLocker") {
+    return { platform: "tradelocker", accountType: "slave" };
+  }
+  if (path === "/api/v1/register_master_matchTrade") {
+    return { platform: "matchtrade", accountType: "master" };
+  }
+  if (path === "/api/v1/register_slave_matchTrade") {
+    return { platform: "matchtrade", accountType: "slave" };
+  }
+  return null;
+}
+
+// /api/v1/follow/{X}  (slave delete)  → returns X
+// /api/v1/source/{X}  (master delete) → returns X
+// Otherwise null.
+function matchDeleteId(path: string): bigint | null {
+  const m = path.match(/^\/api\/v1\/(?:follow|source)\/(\d+)$/);
+  if (!m) return null;
+  try {
+    return BigInt(m[1]);
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   // CORS preflight
   if (req.method === "OPTIONS") {
@@ -51,16 +134,12 @@ Deno.serve(async (req) => {
   // Require an authenticated Supabase user. Edge Functions accept any
   // valid JWT (including the public anon key) by default; we explicitly
   // check for a real user session here.
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL") ?? "",
-    Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-    {
-      global: {
-        headers: { Authorization: req.headers.get("Authorization") ?? "" },
-      },
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: {
+      headers: { Authorization: req.headers.get("Authorization") ?? "" },
     },
-  );
-  const { data: { user } } = await supabase.auth.getUser();
+  });
+  const { data: { user } } = await userClient.auth.getUser();
   if (!user) {
     return json(
       { error: "Unauthorized: requires authenticated Supabase session" },
@@ -81,6 +160,36 @@ Deno.serve(async (req) => {
     );
   }
   const proxyPath = url.pathname.slice(apiIdx);
+
+  // ---------------------------------------------------------------
+  // Slot-quota gate — only on POST /register* endpoints.
+  // ---------------------------------------------------------------
+  const registerMatch = req.method === "POST" ? matchRegister(proxyPath) : null;
+  if (registerMatch) {
+    const { data: usage, error: usageErr } = await userClient.rpc(
+      "get_my_slot_usage",
+    );
+    if (usageErr) {
+      console.error("get_my_slot_usage failed:", usageErr);
+      return json(
+        { error: `Slot quota lookup failed: ${usageErr.message}` },
+        500,
+      );
+    }
+    const row = Array.isArray(usage) ? usage[0] : usage;
+    const used = row?.used ?? 0;
+    const quota = row?.quota ?? 0;
+    if (used >= quota) {
+      return json(
+        {
+          error:
+            `Insufficient slot capacity (${used}/${quota} used). ` +
+            `Buy more slots from the Plans tab to register additional accounts.`,
+        },
+        403,
+      );
+    }
+  }
 
   // Build upstream URL
   let upstreamUrl = `${TRADING_API_BASE}${proxyPath}${url.search}`;
@@ -124,9 +233,9 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Pass through upstream response, layering CORS headers on top.
-  // Strip hop-by-hop and content-encoding/length (Deno's fetch already
-  // decompressed the body, so passing those would mislead the browser).
+  // ---------------------------------------------------------------
+  // Build response headers up front.
+  // ---------------------------------------------------------------
   const responseHeaders = new Headers();
   upstream.headers.forEach((value, key) => {
     const k = key.toLowerCase();
@@ -144,6 +253,105 @@ Deno.serve(async (req) => {
     responseHeaders.set(key, value);
   });
   Object.entries(corsHeaders).forEach(([k, v]) => responseHeaders.set(k, v));
+
+  // ---------------------------------------------------------------
+  // Register: read response body to extract the trading API's
+  // serverId, write ownership row with both serverId + login_number,
+  // then re-stream the buffered body to the client. We MUST buffer
+  // here because reading consumes the body and we still need to
+  // forward it.
+  // ---------------------------------------------------------------
+  if (registerMatch) {
+    const bodyText = await upstream.text();
+    if (upstream.ok) {
+      const loginParam = url.searchParams.get("userId") ?? "";
+      let serverId: number | null = null;
+      try {
+        const parsed = JSON.parse(bodyText) as {
+          data?: unknown;
+          success?: unknown;
+        };
+        // Even on HTTP 200, the trading API returns success:false on
+        // logical failures. Skip the ownership write in that case.
+        if (parsed.success === false) {
+          // pass — no insert
+        } else {
+          const dataField = parsed.data;
+          if (typeof dataField === "number" && Number.isFinite(dataField)) {
+            serverId = dataField;
+          } else if (typeof dataField === "string") {
+            const n = Number(dataField);
+            if (Number.isFinite(n) && n > 0) serverId = n;
+          }
+        }
+      } catch (e) {
+        console.error(
+          "Could not parse register response body:",
+          bodyText,
+          e,
+        );
+      }
+
+      if (serverId !== null && loginParam !== "") {
+        const adminClient = createClient(
+          SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY,
+        );
+        const displayName = url.searchParams.get("comment") || null;
+        const { error: insertErr } = await adminClient
+          .from("account_ownership")
+          .insert({
+            trading_account_id: serverId,
+            login_number: loginParam,
+            user_id: user.id,
+            platform: registerMatch.platform,
+            account_type: registerMatch.accountType,
+            display_name: displayName,
+          });
+        if (insertErr) {
+          console.error(
+            `account_ownership insert failed (serverId=${serverId}, ` +
+              `login=${loginParam}):`,
+            insertErr,
+          );
+        }
+      } else if (loginParam !== "" && serverId === null) {
+        console.error(
+          `Register HTTP ok but couldn't extract serverId from response. ` +
+            `login=${loginParam}, body=${bodyText}`,
+        );
+      }
+    }
+    return new Response(bodyText, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // Delete: ownership row is keyed on trading_account_id (= serverId),
+  // which is the same X the trading API takes in the path. Stream the
+  // body through; do the DB delete in parallel.
+  // ---------------------------------------------------------------
+  if (req.method === "DELETE" && upstream.ok) {
+    const deleteId = matchDeleteId(proxyPath);
+    if (deleteId !== null) {
+      const adminClient = createClient(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY,
+      );
+      const { error: delErr } = await adminClient
+        .from("account_ownership")
+        .delete()
+        .eq("trading_account_id", deleteId.toString());
+      if (delErr) {
+        console.error(
+          `account_ownership delete failed for serverId=${deleteId}:`,
+          delErr,
+        );
+      }
+    }
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,

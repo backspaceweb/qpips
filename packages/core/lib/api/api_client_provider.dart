@@ -5,6 +5,7 @@ import 'package:provider/single_child_widget.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'generated/api.swagger.dart';
 import '../interceptors/supabase_auth_interceptor.dart';
+import '../repositories/account_repository.dart';
 import '../repositories/auth_repository.dart';
 import '../repositories/subscription_repository.dart';
 import '../repositories/trading_repository.dart';
@@ -47,6 +48,10 @@ class ApiClientProvider {
 
     Provider<SubscriptionRepository>(
       create: (_) => SupabaseSubscriptionRepository(Supabase.instance.client),
+    ),
+
+    Provider<AccountRepository>(
+      create: (_) => SupabaseAccountRepository(Supabase.instance.client),
     ),
   ];
 }

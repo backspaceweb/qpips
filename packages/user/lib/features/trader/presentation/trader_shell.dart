@@ -5,6 +5,7 @@ import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 import 'package:qp_design/widgets/demo_data_banner.dart';
+import 'accounts/accounts_screen.dart';
 import 'discover/discover_screen.dart';
 import 'my_follows/my_follows_screen.dart';
 import 'placeholder_tab.dart';
@@ -37,12 +38,12 @@ class _TraderShellState extends State<TraderShell> {
         return const DiscoverScreen();
       case TraderTab.myFollows:
         return const MyFollowsScreen();
+      case TraderTab.accounts:
+        return const AccountsScreen();
       case TraderTab.wallet:
         return const WalletScreen();
       case TraderTab.plans:
         return const PlansScreen();
-      case TraderTab.profile:
-        return const PlaceholderTab(tabLabel: 'Profile');
       case TraderTab.settings:
         return const PlaceholderTab(tabLabel: 'Settings');
     }
