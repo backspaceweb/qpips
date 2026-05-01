@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:qp_core/domain/plan_tier.dart';
 import 'package:qp_core/domain/user_subscription.dart';
 import 'package:qp_core/repositories/subscription_repository.dart';
+import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
@@ -20,7 +21,7 @@ class SubscriptionsTab extends StatefulWidget {
 }
 
 class _SubscriptionsTabState extends State<SubscriptionsTab> {
-  Future<List<UserSubscription>>? _future;
+  Future<_SubsAndCapacity>? _future;
   bool _running = false;
 
   @override
@@ -29,8 +30,22 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
     _future = _load();
   }
 
-  Future<List<UserSubscription>> _load() {
-    return context.read<SubscriptionRepository>().listAllSubscriptions();
+  /// Loads subscriptions + the operator's bought-capacity in parallel.
+  /// `accountLimit` comes from the trading API's getAPIInfo response —
+  /// can be null if the call fails (network, expired key, etc.). Strip
+  /// hides the capacity section when null rather than guessing.
+  Future<_SubsAndCapacity> _load() async {
+    final subRepo = context.read<SubscriptionRepository>();
+    final tradingRepo = context.read<TradingRepository>();
+    final results = await Future.wait([
+      subRepo.listAllSubscriptions(),
+      tradingRepo.getAPIInfo(),
+    ]);
+    final subs = results[0] as List<UserSubscription>;
+    final apiInfo = results[1] as Map<String, dynamic>?;
+    final raw = apiInfo == null ? null : apiInfo['accountLimit'];
+    final accountLimit = raw is num ? raw.toInt() : null;
+    return _SubsAndCapacity(subs: subs, accountLimit: accountLimit);
   }
 
   void _refresh() {
@@ -70,15 +85,20 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<UserSubscription>>(
+    return FutureBuilder<_SubsAndCapacity>(
       future: _future,
       builder: (context, snap) {
         final loading = snap.connectionState != ConnectionState.done;
-        final subs = snap.data ?? const <UserSubscription>[];
+        final subs = snap.data?.subs ?? const <UserSubscription>[];
+        final accountLimit = snap.data?.accountLimit;
         final agg = _Aggregates.compute(subs);
         return Column(
           children: [
-            _InventoryStrip(agg: agg, loading: loading),
+            _InventoryStrip(
+              agg: agg,
+              loading: loading,
+              accountLimit: accountLimit,
+            ),
             _renewalsBanner(),
             Expanded(
               child: RefreshIndicator(
@@ -378,6 +398,17 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
+/// Combined load result: subscriptions + the operator's bought capacity
+/// (accountLimit from getAPIInfo). Capacity is nullable because the
+/// trading API call can fail or return an unexpected shape; the strip
+/// hides the capacity row when null rather than guessing.
+class _SubsAndCapacity {
+  final List<UserSubscription> subs;
+  final int? accountLimit;
+
+  const _SubsAndCapacity({required this.subs, required this.accountLimit});
+}
+
 /// Client-side aggregation of all subscription rows. Computes:
 ///   - totalSlots / activeCount across status='active' rows only
 ///   - totalBooked = sum of total_paid (lifetime revenue from currently
@@ -454,7 +485,15 @@ class _InventoryStrip extends StatelessWidget {
   final _Aggregates agg;
   final bool loading;
 
-  const _InventoryStrip({required this.agg, required this.loading});
+  /// Operator's bought slot capacity from the trading API team. Null
+  /// when getAPIInfo failed — the capacity row hides in that case.
+  final int? accountLimit;
+
+  const _InventoryStrip({
+    required this.agg,
+    required this.loading,
+    required this.accountLimit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -514,6 +553,10 @@ class _InventoryStrip extends StatelessWidget {
                   valueColor: AppColors.profit),
             ],
           ),
+          if (accountLimit != null) ...[
+            const SizedBox(height: AppSpacing.lg),
+            _capacityBar(),
+          ],
           const SizedBox(height: AppSpacing.lg),
           Text(
             'BY TIER',
@@ -570,6 +613,111 @@ class _InventoryStrip extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Capacity utilization: how much of the operator's bought capacity
+  /// (from the trading API team) has been resold to traders. Color
+  /// thresholds: <70% green / 70–89% amber / ≥90% red — at red the
+  /// operator should buy more capacity from the API team before more
+  /// traders try to register slaves.
+  Widget _capacityBar() {
+    final limit = accountLimit!;
+    final sold = agg.totalSlots;
+    final available = (limit - sold).clamp(0, limit);
+    final pct = limit == 0 ? 0.0 : (sold / limit).clamp(0.0, 1.0);
+    final pctLabel = '${(pct * 100).toStringAsFixed(0)}%';
+    final overSold = sold > limit;
+    final color = overSold || pct >= 0.90
+        ? AppColors.loss
+        : pct >= 0.70
+            ? AppColors.warning
+            : AppColors.profit;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceMuted,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.surfaceBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.inventory_2_outlined,
+                size: 16,
+                color: AppColors.textMuted,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                'CAPACITY',
+                style: AppTypography.labelSmall.copyWith(
+                  color: AppColors.textMuted,
+                  fontSize: 10,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                pctLabel,
+                style: AppTypography.titleMedium.copyWith(
+                  fontSize: 14,
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Text(
+                '$sold of $limit slots sold',
+                style: AppTypography.bodyMedium.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                '· $available available to sell',
+                style: AppTypography.bodySmall.copyWith(
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 8,
+              backgroundColor: AppColors.surfaceBorder,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+          if (overSold) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Sold ${sold - limit} more slots than the trading API team '
+              "covers — buy more capacity before any new trader registration "
+              'gets blocked.',
+              style: AppTypography.bodySmall.copyWith(color: AppColors.loss),
+            ),
+          ] else if (pct >= 0.90) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Approaching capacity ceiling — buy more slots from the '
+              'trading API team soon.',
+              style: AppTypography.bodySmall.copyWith(color: AppColors.warning),
+            ),
+          ],
+        ],
       ),
     );
   }
