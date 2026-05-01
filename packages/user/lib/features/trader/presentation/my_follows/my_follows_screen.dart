@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:qp_core/domain/account.dart';
+import 'package:qp_core/domain/account_ownership.dart';
 import 'package:qp_core/domain/active_follow.dart';
 import 'package:qp_core/repositories/trader_live_state_controller.dart';
 import 'package:qp_core/repositories/trader_repository.dart';
@@ -7,6 +9,7 @@ import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 import 'package:qp_design/widgets/primary_button.dart';
+import '../accounts/widgets/slave_settings_dialog.dart';
 import '../profile/provider_profile_screen.dart';
 import 'widgets/follow_row.dart';
 import 'widgets/follows_summary.dart';
@@ -91,15 +94,54 @@ class _MyFollowsScreenState extends State<MyFollowsScreen> {
     );
   }
 
-  void _comingSoonSettings() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'In-place settings editing lands later. For now, unfollow then '
-          're-bind to change risk or limits.',
+  /// Opens the per-slave settings dialog (risk multiplier, copy SL/TP,
+  /// scalper, order filter, auto-close limits, symbols) for the slave
+  /// behind this follow. Reuses the same SlaveSettingsDialog that the
+  /// Accounts tab uses — single source of truth for per-slave config.
+  ///
+  /// Slave identity comes from the live-state controller's accounts list
+  /// (already loaded for the rest of My Follows). If the controller
+  /// hasn't initialised yet, surface a soft message rather than failing.
+  void _openSettings(ActiveFollow follow) {
+    final serverId = int.tryParse(follow.slaveAccountId);
+    if (serverId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't open settings — invalid slave id."),
+          duration: Duration(seconds: 2),
         ),
-        duration: Duration(seconds: 3),
-      ),
+      );
+      return;
+    }
+    final controller = context.read<TraderLiveStateController>();
+    final idx = controller.accounts
+        .indexWhere((a) => a.tradingAccountId == serverId);
+    if (idx == -1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Slave account is still loading — please try again in a moment.',
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      barrierColor: AppColors.overlay,
+      builder: (_) =>
+          SlaveSettingsDialog(account: _toAccount(controller.accounts[idx])),
+    );
+  }
+
+  Account _toAccount(AccountOwnership a) {
+    return Account(
+      serverId: a.tradingAccountId,
+      loginNumber: a.loginNumber,
+      accountName: a.effectiveLabel,
+      accountType: a.accountType,
+      platform: a.platform,
     );
   }
 
@@ -193,7 +235,7 @@ class _MyFollowsScreenState extends State<MyFollowsScreen> {
                               follow: f,
                               onTogglePause: () => _togglePause(f),
                               onUnfollow: () => _unfollow(f),
-                              onSettings: _comingSoonSettings,
+                              onSettings: () => _openSettings(f),
                               onOpenMaster: () => _openMasterProfile(f),
                             ),
                           ),
