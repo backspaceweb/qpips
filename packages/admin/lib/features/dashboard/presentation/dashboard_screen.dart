@@ -203,7 +203,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             onTap: () => _comingSoon(context, 'Settings'),
           ),
           const Spacer(),
-          _buildNavItem(Icons.logout, 'Logout', false, Colors.redAccent,
+          _buildNavItem(Icons.logout, 'Logout', false, AppColors.loss,
               onTap: () async {
             await context.read<AuthRepository>().signOut();
             if (mounted) {
@@ -219,12 +219,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildNavItem(IconData icon, String label, bool active, Color color,
       {VoidCallback? onTap}) {
     return ListTile(
-      leading: Icon(icon, color: active ? color : Colors.grey, size: 22),
+      leading: Icon(icon, color: active ? color : AppColors.textMuted, size: 22),
       title: _isSidebarCollapsed
           ? null
           : Text(label,
               style: TextStyle(
-                  color: active ? color : Colors.grey,
+                  color: active ? color : AppColors.textMuted,
                   fontWeight: active ? FontWeight.bold : FontWeight.normal)),
       onTap: onTap,
     );
@@ -249,7 +249,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         children: const [
           Text('Trading Dashboard',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          CircleAvatar(radius: 18, backgroundColor: Colors.grey),
+          CircleAvatar(radius: 18, backgroundColor: AppColors.textMuted),
         ],
       ),
     );
@@ -262,14 +262,14 @@ class _DashboardScreenState extends State<DashboardScreen>
             'Total Accounts',
             _metrics['totalAccounts']?.toString() ?? '0',
             Icons.account_balance,
-            Colors.blue,
+            AppColors.info,
             isDark),
         const SizedBox(width: 24),
         _buildMetricCard(
             'Account Limit',
             _metrics['accountLimit']?.toString() ?? '--',
             Icons.lock_clock,
-            Colors.orange,
+            AppColors.warning,
             isDark),
         const SizedBox(width: 24),
         _buildMetricCard(
@@ -283,7 +283,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             'Active Trades',
             _metrics['activeTrades']?.toString() ?? 'No active trades',
             Icons.trending_up,
-            Colors.green,
+            AppColors.profit,
             isDark),
       ],
     );
@@ -308,7 +308,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             Icon(icon, color: color, size: 28),
             const SizedBox(height: 16),
             Text(title,
-                style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 14)),
             const SizedBox(height: 4),
             Text(value,
                 style: const TextStyle(

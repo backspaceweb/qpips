@@ -46,7 +46,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: AppColors.loss,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -68,7 +68,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             'This account is not authorised for the admin panel. '
             'Trader accounts should sign in via the user app.',
           ),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: AppColors.loss,
           behavior: SnackBarBehavior.floating,
           duration: Duration(seconds: 4),
         ),
@@ -81,7 +81,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Login successful'),
-        backgroundColor: Colors.green,
+        backgroundColor: AppColors.profit,
         behavior: SnackBarBehavior.floating,
       ),
     );

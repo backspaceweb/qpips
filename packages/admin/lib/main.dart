@@ -118,7 +118,7 @@ class _AdminGateState extends State<_AdminGate> {
                 content: Text(
                   'Signed out — that account is not authorised for the admin panel.',
                 ),
-                backgroundColor: Colors.redAccent,
+                backgroundColor: AppColors.loss,
                 behavior: SnackBarBehavior.floating,
                 duration: Duration(seconds: 4),
               ),

@@ -62,7 +62,7 @@ class _PriceTickerState extends State<PriceTicker> {
   Widget _buildPriceItem(String symbol, double price) {
     final prevPrice = _previousPrices[symbol] ?? price;
     final isUp = price >= prevPrice;
-    final color = isUp ? Colors.greenAccent : Colors.redAccent;
+    final color = isUp ? AppColors.profit : AppColors.loss;
 
     return Padding(
       padding: const EdgeInsets.only(right: 32.0),
