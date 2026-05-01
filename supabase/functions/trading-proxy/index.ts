@@ -374,9 +374,15 @@ Deno.serve(async (req) => {
         SUPABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY,
       );
+      // mirroring_synced_at = now() in the same UPDATE so the
+      // sync-mirroring cron skips this row — we already pinged the
+      // trading API ourselves a few lines above.
       const { error: updErr } = await adminClient
         .from("account_ownership")
-        .update({ mirroring_disabled: statusParam !== "true" })
+        .update({
+          mirroring_disabled: statusParam !== "true",
+          mirroring_synced_at: new Date().toISOString(),
+        })
         .eq("trading_account_id", idParam)
         .eq("user_id", user.id);
       if (updErr) {
