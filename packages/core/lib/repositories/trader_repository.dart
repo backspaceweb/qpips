@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../domain/account.dart';
 import '../domain/active_follow.dart';
 import '../domain/follow_config.dart';
+import '../domain/live_performance.dart';
 import '../domain/master_listing.dart';
 import '../domain/trader_slave.dart';
 import 'trading_repository.dart';
@@ -280,14 +281,21 @@ class SupabaseTraderRepository implements TraderRepository {
       }
     }
 
+    // Live balance + equity per slave — fired in parallel.
+    final liveStates = await Future.wait([
+      for (final r in list) _liveStateForRow(r),
+    ]);
+
     return [
-      for (final r in list) _toTraderSlave(r, masterLabelById),
+      for (var i = 0; i < list.length; i++)
+        _toTraderSlave(list[i], masterLabelById, liveStates[i]),
     ];
   }
 
   TraderSlaveAccount _toTraderSlave(
     Map<String, dynamic> r,
     Map<int, String> masterLabelById,
+    SlaveLiveState live,
   ) {
     final platform = Platform.parse(r['platform']);
     final masterId = (r['following_master_id'] as num?)?.toInt();
@@ -303,10 +311,9 @@ class SupabaseTraderRepository implements TraderRepository {
       // We don't track the broker server name yet; surface platform.
       broker: platform.wireValue.toUpperCase(),
       loginNumber: r['login_number']?.toString() ?? '',
-      // Live balance + equity come from the trading API; surface 0
-      // until the live-perf slice lands.
-      balance: 0,
-      equity: 0,
+      // Synthetic balance/equity from history — see SlaveLiveState doc.
+      balance: live.balance,
+      equity: live.equity,
       currency: 'USD',
       followingMasterDisplayName: masterLabel,
       isPaused: r['mirroring_disabled'] as bool? ?? false,
@@ -344,14 +351,36 @@ class SupabaseTraderRepository implements TraderRepository {
         (r['master_account_id'] as num).toInt(): r,
     };
 
+    // Live state per slave — fired in parallel. Failure on any single
+    // call defaults to SlaveLiveState.empty so partial slowness doesn't
+    // block the whole list.
+    final liveStates = await Future.wait([
+      for (final r in list) _liveStateForRow(r),
+    ]);
+
     return [
-      for (final r in list) _toActiveFollow(r, listingByMaster),
+      for (var i = 0; i < list.length; i++)
+        _toActiveFollow(list[i], listingByMaster, liveStates[i]),
     ];
+  }
+
+  Future<SlaveLiveState> _liveStateForRow(Map<String, dynamic> r) {
+    return _trading.getAccountLiveState(
+      account: Account(
+        serverId: (r['trading_account_id'] as num).toInt(),
+        loginNumber: r['login_number']?.toString() ?? '',
+        accountName:
+            (r['display_name'] as String?) ?? r['login_number']?.toString() ?? '',
+        accountType: AccountType.slave,
+        platform: Platform.parse(r['platform']),
+      ),
+    );
   }
 
   ActiveFollow _toActiveFollow(
     Map<String, dynamic> r,
     Map<int, Map<String, dynamic>> listingByMaster,
+    SlaveLiveState live,
   ) {
     final masterId = (r['following_master_id'] as num).toInt();
     final listing = listingByMaster[masterId];
@@ -380,14 +409,16 @@ class SupabaseTraderRepository implements TraderRepository {
       slavePlatform: platform,
       slaveBroker: platform.wireValue.toUpperCase(),
       slaveLoginNumber: r['login_number']?.toString() ?? '',
-      slaveBalance: 0,
-      slaveEquity: 0,
+      // Balance / equity are synthetic — see SlaveLiveState doc. The
+      // UI captions them so traders know it's "since registration".
+      slaveBalance: live.balance,
+      slaveEquity: live.equity,
       slaveCurrency: 'USD',
       masterDisplayName: masterDisplayName,
       masterTier: tier,
-      openPnl: 0,
-      todayPnl: 0,
-      openTradesCount: 0,
+      openPnl: live.openPnl,
+      todayPnl: live.todayPnl,
+      openTradesCount: live.openTradesCount,
       isPaused: r['mirroring_disabled'] as bool? ?? false,
     );
   }

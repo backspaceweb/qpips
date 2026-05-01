@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/domain/account.dart';
 import 'package:qp_core/domain/account_ownership.dart';
+import 'package:qp_core/domain/live_performance.dart';
 import 'package:qp_core/domain/provider_listing.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_colors.dart';
@@ -25,6 +26,8 @@ class AccountsTable extends StatelessWidget {
   final List<AccountOwnership> accounts;
   final List<AccountOwnership> allAccounts;
   final Map<int, ProviderListing> listingsByMaster;
+  final Map<int, SlaveLiveState> liveStateByAccount;
+  final Map<int, String> statusByAccount;
   final String search;
   final Platform? platformFilter;
   final ValueChanged<String> onSearchChanged;
@@ -38,6 +41,8 @@ class AccountsTable extends StatelessWidget {
     required this.accounts,
     required this.allAccounts,
     required this.listingsByMaster,
+    required this.liveStateByAccount,
+    required this.statusByAccount,
     required this.search,
     required this.platformFilter,
     required this.onSearchChanged,
@@ -85,6 +90,8 @@ class AccountsTable extends StatelessWidget {
               accounts: accounts,
               allAccounts: allAccounts,
               listingsByMaster: listingsByMaster,
+              liveStateByAccount: liveStateByAccount,
+              statusByAccount: statusByAccount,
               onAccountChanged: onAccountChanged,
             ),
         ],
@@ -213,12 +220,16 @@ class _Table extends StatelessWidget {
   final List<AccountOwnership> accounts;
   final List<AccountOwnership> allAccounts;
   final Map<int, ProviderListing> listingsByMaster;
+  final Map<int, SlaveLiveState> liveStateByAccount;
+  final Map<int, String> statusByAccount;
   final VoidCallback onAccountChanged;
 
   const _Table({
     required this.accounts,
     required this.allAccounts,
     required this.listingsByMaster,
+    required this.liveStateByAccount,
+    required this.statusByAccount,
     required this.onAccountChanged,
   });
 
@@ -233,6 +244,10 @@ class _Table extends StatelessWidget {
             account: accounts[i],
             allAccounts: allAccounts,
             listing: listingsByMaster[accounts[i].tradingAccountId],
+            live: liveStateByAccount[accounts[i].tradingAccountId] ??
+                SlaveLiveState.empty,
+            connectionStatus:
+                statusByAccount[accounts[i].tradingAccountId],
             onChanged: onAccountChanged,
           ),
           if (i != accounts.length - 1)
@@ -260,6 +275,7 @@ class _HeaderRow extends StatelessWidget {
           Expanded(flex: 3, child: Text('ACCOUNT', style: style)),
           Expanded(flex: 2, child: Text('PLATFORM', style: style)),
           Expanded(flex: 2, child: Text('BALANCE', style: style)),
+          Expanded(flex: 2, child: Text('EQUITY', style: style)),
           Expanded(flex: 2, child: Text('CONNECTION', style: style)),
           Expanded(flex: 2, child: Text('STATUS', style: style)),
           SizedBox(width: 300, child: Text('ACTIONS', style: style)),
@@ -273,11 +289,15 @@ class _AccountRow extends StatefulWidget {
   final AccountOwnership account;
   final List<AccountOwnership> allAccounts;
   final ProviderListing? listing;
+  final SlaveLiveState live;
+  final String? connectionStatus;
   final VoidCallback onChanged;
   const _AccountRow({
     required this.account,
     required this.allAccounts,
     required this.listing,
+    required this.live,
+    required this.connectionStatus,
     required this.onChanged,
   });
 
@@ -507,21 +527,27 @@ class _AccountRowState extends State<_AccountRow> {
           ),
           Expanded(
             flex: 2,
-            child: Text(
-              '—',
-              style: AppTypography.bodyMedium.copyWith(
-                color: AppColors.textMuted,
+            child: Tooltip(
+              message: 'Net since QuantumPips registration. The trading '
+                  "API doesn't expose live balance — value is "
+                  'reconstructed from deposits + realised P&L on '
+                  'QuantumPips.',
+              child: Text(
+                '\$${widget.live.balance.toStringAsFixed(2)}',
+                style: AppTypography.bodyMedium,
               ),
             ),
           ),
           Expanded(
             flex: 2,
             child: Text(
-              '—',
-              style: AppTypography.bodyMedium.copyWith(
-                color: AppColors.textMuted,
-              ),
+              '\$${widget.live.equity.toStringAsFixed(2)}',
+              style: AppTypography.bodyMedium,
             ),
+          ),
+          Expanded(
+            flex: 2,
+            child: _ConnectionPill(status: widget.connectionStatus),
           ),
           Expanded(
             flex: 2,
@@ -680,6 +706,55 @@ class _EditButton extends StatelessWidget {
       tooltip: platformSupported
           ? 'Edit account'
           : 'Edit not available on this platform yet',
+    );
+  }
+}
+
+class _ConnectionPill extends StatelessWidget {
+  final String? status;
+  const _ConnectionPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final raw = status?.trim() ?? '';
+    if (raw.isEmpty) {
+      return Text(
+        '—',
+        style: AppTypography.bodyMedium.copyWith(
+          color: AppColors.textMuted,
+        ),
+      );
+    }
+    // Heuristic colour mapping: anything containing "connect" without
+    // a "dis" prefix is treated as healthy. Refine once we see what
+    // values the trading API actually emits.
+    final lower = raw.toLowerCase();
+    final isConnected =
+        (lower.contains('connect') && !lower.contains('disc')) ||
+            lower == 'online' ||
+            lower == 'active';
+    final isDisconnected =
+        lower.contains('disconn') || lower == 'offline' || lower == 'down';
+    final color = isConnected
+        ? AppColors.profit
+        : (isDisconnected ? AppColors.loss : AppColors.warning);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        ),
+        child: Text(
+          raw.toUpperCase(),
+          style: AppTypography.labelSmall.copyWith(
+            color: color,
+            fontSize: 9,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:qp_core/domain/account_ownership.dart';
 import 'package:qp_core/domain/provider_listing.dart';
 import 'package:qp_core/repositories/account_repository.dart';
 import 'package:qp_core/repositories/provider_listing_repository.dart';
+import 'package:qp_core/repositories/trader_live_state_controller.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
@@ -16,17 +17,11 @@ import 'widgets/slot_indicator.dart';
 
 /// Accounts tab — trader's view of their registered trading accounts.
 ///
-/// Layout (matches Susanto's design sample):
-///   - Header row: "Accounts Configuration" + slot-usage progress bar +
-///     "Add Account" button (disabled when slots are exhausted)
-///   - 4 stat cards: Total / Active / Inactive / Best Performing
-///   - Accounts panel: search + platform filter + sortable table +
-///     pagination + No-Data empty state
-///
-/// Reads ownership rows from `account_ownership` (Supabase). Live state
-/// (connection, balance) ships in B.2.3 via getStatusbyID + the live-
-/// state endpoints; for now Status defaults to ACTIVE (mirroring_disabled
-/// flips it once B.4 lands), Connection + Balance show placeholders.
+/// Live values (balance, equity, openPnl, openTradesCount, status) come
+/// from a centralised [TraderLiveStateController] (E.4) so they stay
+/// in lockstep with the same numbers shown on My Follows. This screen
+/// loads the page-specific static data (slot usage, listings) and
+/// reads everything else from the controller via Consumer.
 class AccountsScreen extends StatefulWidget {
   const AccountsScreen({super.key});
 
@@ -35,53 +30,58 @@ class AccountsScreen extends StatefulWidget {
 }
 
 class _AccountsScreenState extends State<AccountsScreen> {
-  Future<_AccountsData>? _future;
+  Future<_StaticData>? _staticFuture;
   String _search = '';
   Platform? _platformFilter;
 
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    _staticFuture = _loadStatic();
   }
 
-  Future<_AccountsData> _load() async {
-    final repo = context.read<AccountRepository>();
+  Future<_StaticData> _loadStatic() async {
     final providerRepo = context.read<ProviderListingRepository>();
+    final accountRepo = context.read<AccountRepository>();
     final results = await Future.wait([
-      repo.listMyAccounts(),
-      repo.getMySlotUsage(),
+      accountRepo.getMySlotUsage(),
       providerRepo.listMine(),
     ]);
-    final listings = results[2] as List<ProviderListing>;
-    return _AccountsData(
-      accounts: results[0] as List<AccountOwnership>,
-      usage: results[1] as SlotUsage,
+    final listings = results[1] as List<ProviderListing>;
+    return _StaticData(
+      usage: results[0] as SlotUsage,
       listingsByMaster: {
         for (final l in listings) l.masterAccountId: l,
       },
     );
   }
 
-  void _refresh() {
+  Future<void> _refresh() async {
     setState(() {
-      _future = _load();
+      _staticFuture = _loadStatic();
     });
+    await context.read<TraderLiveStateController>().refresh();
   }
 
-  Future<void> _openAddDialog(_AccountsData data) async {
-    final masters = data.accounts
-        .where((a) => a.accountType == AccountType.master)
-        .toList();
+  Future<void> _openAddDialog(_StaticData staticData,
+      List<AccountOwnership> accounts) async {
+    final masters =
+        accounts.where((a) => a.accountType == AccountType.master).toList();
     final added = await showDialog<bool>(
       context: context,
       barrierColor: AppColors.overlay,
       builder: (_) => AddAccountDialog(
-        usage: data.usage,
+        usage: staticData.usage,
         existingMasters: masters,
       ),
     );
-    if (added == true) _refresh();
+    if (added == true) {
+      // New account → reload static data + refresh controller's
+      // accounts list so polling picks up the new fleet.
+      await _refresh();
+      if (!mounted) return;
+      await context.read<TraderLiveStateController>().reloadAccounts();
+    }
   }
 
   List<AccountOwnership> _applyFilters(List<AccountOwnership> all) {
@@ -98,6 +98,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
     return filtered.toList();
   }
 
+  /// Called by row-level mutations (delete, switch master, edit) so
+  /// the controller picks up the new fleet.
+  void _onRowMutated() {
+    context.read<TraderLiveStateController>().reloadAccounts();
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
@@ -108,66 +114,73 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
     return RefreshIndicator(
       color: AppColors.primaryAccent,
-      onRefresh: () async {
-        _refresh();
-        await _future;
-      },
+      onRefresh: _refresh,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.symmetric(
           horizontal: hPad,
           vertical: AppSpacing.xxl,
         ),
-        child: FutureBuilder<_AccountsData>(
-          future: _future,
-          builder: (context, snap) {
-            if (snap.connectionState != ConnectionState.done) {
-              return const SizedBox(
-                height: 320,
-                child: Center(
-                  child: CircularProgressIndicator(
-                    color: AppColors.primaryAccent,
-                  ),
-                ),
-              );
+        child: FutureBuilder<_StaticData>(
+          future: _staticFuture,
+          builder: (context, staticSnap) {
+            if (staticSnap.connectionState != ConnectionState.done) {
+              return const _Loading();
             }
-            if (snap.hasError) {
+            if (staticSnap.hasError) {
               return _ErrorBlock(
-                message: snap.error.toString(),
+                message: staticSnap.error.toString(),
                 onRetry: _refresh,
               );
             }
-            final data = snap.data!;
-            final visible = _applyFilters(data.accounts);
-            final inactiveCount = data.accounts
-                .where((a) => a.mirroringDisabled)
-                .length;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _Header(
-                  usage: data.usage,
-                  onAddPressed: () => _openAddDialog(data),
-                ),
-                if (inactiveCount > 0) ...[
-                  const SizedBox(height: AppSpacing.lg),
-                  _InactiveBanner(count: inactiveCount),
-                ],
-                const SizedBox(height: AppSpacing.xl),
-                AccountsStatsGrid(accounts: data.accounts),
-                const SizedBox(height: AppSpacing.xl),
-                AccountsTable(
-                  accounts: visible,
-                  allAccounts: data.accounts,
-                  listingsByMaster: data.listingsByMaster,
-                  search: _search,
-                  platformFilter: _platformFilter,
-                  onSearchChanged: (s) => setState(() => _search = s),
-                  onPlatformChanged: (p) =>
-                      setState(() => _platformFilter = p),
-                  onAccountChanged: _refresh,
-                ),
-              ],
+            final staticData = staticSnap.data!;
+            return Consumer<TraderLiveStateController>(
+              builder: (context, ctrl, _) {
+                if (ctrl.initialError != null) {
+                  return _ErrorBlock(
+                    message: ctrl.initialError.toString(),
+                    onRetry: _refresh,
+                  );
+                }
+                if (!ctrl.initialized) {
+                  return const _Loading();
+                }
+                final accounts = ctrl.accounts;
+                final visible = _applyFilters(accounts);
+                final inactiveCount =
+                    accounts.where((a) => a.mirroringDisabled).length;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Header(
+                      usage: staticData.usage,
+                      onAddPressed: () =>
+                          _openAddDialog(staticData, accounts),
+                      lastUpdatedAt: ctrl.lastUpdatedAt,
+                    ),
+                    if (inactiveCount > 0) ...[
+                      const SizedBox(height: AppSpacing.lg),
+                      _InactiveBanner(count: inactiveCount),
+                    ],
+                    const SizedBox(height: AppSpacing.xl),
+                    AccountsStatsGrid(accounts: accounts),
+                    const SizedBox(height: AppSpacing.xl),
+                    AccountsTable(
+                      accounts: visible,
+                      allAccounts: accounts,
+                      listingsByMaster: staticData.listingsByMaster,
+                      liveStateByAccount: ctrl.liveStateByAccount,
+                      statusByAccount: ctrl.statusByAccount,
+                      search: _search,
+                      platformFilter: _platformFilter,
+                      onSearchChanged: (s) => setState(() => _search = s),
+                      onPlatformChanged: (p) =>
+                          setState(() => _platformFilter = p),
+                      onAccountChanged: _onRowMutated,
+                    ),
+                  ],
+                );
+              },
             );
           },
         ),
@@ -176,22 +189,39 @@ class _AccountsScreenState extends State<AccountsScreen> {
   }
 }
 
-class _AccountsData {
-  final List<AccountOwnership> accounts;
+class _StaticData {
   final SlotUsage usage;
   final Map<int, ProviderListing> listingsByMaster;
-  const _AccountsData({
-    required this.accounts,
+  const _StaticData({
     required this.usage,
     required this.listingsByMaster,
   });
 }
 
+class _Loading extends StatelessWidget {
+  const _Loading();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      height: 320,
+      child: Center(
+        child: CircularProgressIndicator(color: AppColors.primaryAccent),
+      ),
+    );
+  }
+}
+
 class _Header extends StatelessWidget {
   final SlotUsage usage;
   final VoidCallback onAddPressed;
+  final DateTime? lastUpdatedAt;
 
-  const _Header({required this.usage, required this.onAddPressed});
+  const _Header({
+    required this.usage,
+    required this.onAddPressed,
+    required this.lastUpdatedAt,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -208,6 +238,16 @@ class _Header extends StatelessWidget {
           'subscriptions.',
           style: AppTypography.bodyMedium,
         ),
+        if (lastUpdatedAt != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Live values updated ${_relativeTime(lastUpdatedAt!)}.',
+            style: AppTypography.bodySmall.copyWith(
+              color: AppColors.textMuted,
+              fontSize: 11,
+            ),
+          ),
+        ],
       ],
     );
     final right = SlotIndicator(
@@ -237,11 +277,21 @@ class _Header extends StatelessWidget {
       ],
     );
   }
+
+  String _relativeTime(DateTime t) {
+    final secs = DateTime.now().difference(t).inSeconds;
+    if (secs < 5) return 'just now';
+    if (secs < 60) return '${secs}s ago';
+    final mins = secs ~/ 60;
+    if (mins < 60) return '${mins}m ago';
+    final hours = mins ~/ 60;
+    return '${hours}h ago';
+  }
 }
 
 class _ErrorBlock extends StatelessWidget {
   final String message;
-  final VoidCallback onRetry;
+  final Future<void> Function() onRetry;
   const _ErrorBlock({required this.message, required this.onRetry});
 
   @override

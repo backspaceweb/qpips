@@ -1,15 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/domain/account.dart';
 import 'package:qp_core/domain/trade_order.dart';
+import 'package:qp_core/repositories/trader_live_state_controller.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_colors.dart';
 
 /// Bottom sheet showing live order data for a single account.
 ///
-/// Loads `getOpenOrders` and `getOrderHistory` (last 7 days, trades
-/// only) in parallel and renders two tables. Used by the dashboard's
-/// info-icon action.
+/// Open-orders are sourced from [TraderLiveStateController] (already
+/// polling at 3s for the whole fleet — no extra API cost). History
+/// is fetched on mount and auto-refreshed every 30s while the sheet
+/// is open. Manual refresh button forces both.
 class AccountDetailsSheet extends StatefulWidget {
   final Account account;
 
@@ -20,37 +24,49 @@ class AccountDetailsSheet extends StatefulWidget {
 }
 
 class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
-  bool _loading = true;
-  List<TradeOrder> _open = [];
+  bool _historyLoading = true;
   List<TradeOrder> _history = [];
+  Timer? _historyTimer;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadHistory();
+    _historyTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _loadHistory(silent: true),
+    );
   }
 
-  Future<void> _load() async {
-    final repo = context.read<TradingRepository>();
-    final now = DateTime.now();
-    final from = now.subtract(const Duration(days: 7));
+  @override
+  void dispose() {
+    _historyTimer?.cancel();
+    super.dispose();
+  }
 
-    final results = await Future.wait([
-      repo.getOpenOrders(account: widget.account),
-      repo.getOrderHistory(
+  Future<void> _loadHistory({bool silent = false}) async {
+    if (!silent) {
+      setState(() => _historyLoading = true);
+    }
+    try {
+      final repo = context.read<TradingRepository>();
+      final now = DateTime.now();
+      final from = now.subtract(const Duration(days: 7));
+      final history = await repo.getOrderHistory(
         account: widget.account,
         from: from,
         to: now,
         tradesOnly: true,
-      ),
-    ]);
-
-    if (!mounted) return;
-    setState(() {
-      _open = results[0];
-      _history = results[1];
-      _loading = false;
-    });
+      );
+      if (!mounted) return;
+      setState(() {
+        _history = history;
+        _historyLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _historyLoading = false);
+    }
   }
 
   @override
@@ -58,51 +74,59 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenH = MediaQuery.of(context).size.height;
 
-    return DefaultTabController(
-      length: 2,
-      child: Container(
-        height: screenH * 0.86,
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          children: [
-            _buildDragHandle(),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(28, 4, 16, 0),
-              child: _buildHeader(isDark),
+    return Consumer<TraderLiveStateController>(
+      builder: (context, ctrl, _) {
+        final open = ctrl.openOrdersFor(widget.account.serverId);
+        return DefaultTabController(
+          length: 2,
+          child: Container(
+            height: screenH * 0.86,
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
             ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 28),
-              child: _buildStatsStrip(isDark),
-            ),
-            const SizedBox(height: 20),
-            _buildTabBar(isDark),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _buildTabContent(
-                    isOpenView: true,
-                    orders: _open,
-                    isDark: isDark,
-                    emptyText: 'No open orders right now.',
-                    emptyIcon: Icons.trending_flat,
+            child: Column(
+              children: [
+                _buildDragHandle(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 4, 16, 0),
+                  child: _buildHeader(isDark, ctrl),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: _buildStatsStrip(isDark, open),
+                ),
+                const SizedBox(height: 20),
+                _buildTabBar(isDark, open),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _buildTabContent(
+                        isOpenView: true,
+                        orders: open,
+                        loading: false,
+                        isDark: isDark,
+                        emptyText: 'No open orders right now.',
+                        emptyIcon: Icons.trending_flat,
+                      ),
+                      _buildTabContent(
+                        isOpenView: false,
+                        orders: _history,
+                        loading: _historyLoading,
+                        isDark: isDark,
+                        emptyText: 'No closed trades in the last 7 days.',
+                        emptyIcon: Icons.history_toggle_off,
+                      ),
+                    ],
                   ),
-                  _buildTabContent(
-                    isOpenView: false,
-                    orders: _history,
-                    isDark: isDark,
-                    emptyText: 'No closed trades in the last 7 days.',
-                    emptyIcon: Icons.history_toggle_off,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -118,7 +142,7 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     );
   }
 
-  Widget _buildHeader(bool isDark) {
+  Widget _buildHeader(bool isDark, TraderLiveStateController ctrl) {
     final acc = widget.account;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -146,11 +170,11 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
             const SizedBox(width: 8),
             IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: _loading
+              onPressed: _historyLoading
                   ? null
                   : () {
-                      setState(() => _loading = true);
-                      _load();
+                      ctrl.refresh();
+                      _loadHistory();
                     },
               tooltip: 'Reload',
             ),
@@ -186,19 +210,42 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
   }
 
   /// Top metric strip: open count, open P&L, history count, history net P&L.
-  Widget _buildStatsStrip(bool isDark) {
-    final openPnl = _open.fold<double>(0, (s, o) => s + o.profit);
-    final histPnl = _history.fold<double>(0, (s, o) => s + o.profit + o.commission + o.swap);
+  Widget _buildStatsStrip(bool isDark, List<TradeOrder> open) {
+    final openPnl = open.fold<double>(0, (s, o) => s + o.profit);
+    final histPnl = _history.fold<double>(
+      0,
+      (s, o) => s + o.profit + o.commission + o.swap,
+    );
 
     return Row(
       children: [
-        Expanded(child: _statCard('Open Trades', _loading ? '—' : '${_open.length}', isDark)),
+        Expanded(child: _statCard('Open Trades', '${open.length}', isDark)),
         const SizedBox(width: 12),
-        Expanded(child: _statCard('Open P&L', _loading ? '—' : _fmtMoney(openPnl), isDark, valueColor: _pnlColor(openPnl))),
+        Expanded(
+          child: _statCard(
+            'Open P&L',
+            _fmtMoney(openPnl),
+            isDark,
+            valueColor: _pnlColor(openPnl),
+          ),
+        ),
         const SizedBox(width: 12),
-        Expanded(child: _statCard('History (7d)', _loading ? '—' : '${_history.length}', isDark)),
+        Expanded(
+          child: _statCard(
+            'History (7d)',
+            _historyLoading ? '—' : '${_history.length}',
+            isDark,
+          ),
+        ),
         const SizedBox(width: 12),
-        Expanded(child: _statCard('Net P&L (7d)', _loading ? '—' : _fmtMoney(histPnl), isDark, valueColor: _pnlColor(histPnl))),
+        Expanded(
+          child: _statCard(
+            'Net P&L (7d)',
+            _historyLoading ? '—' : _fmtMoney(histPnl),
+            isDark,
+            valueColor: _pnlColor(histPnl),
+          ),
+        ),
       ],
     );
   }
@@ -236,7 +283,7 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
     );
   }
 
-  Widget _buildTabBar(bool isDark) {
+  Widget _buildTabBar(bool isDark, List<TradeOrder> open) {
     return Container(
       decoration: BoxDecoration(
         border: Border(
@@ -252,8 +299,12 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
         indicatorWeight: 2.5,
         labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         tabs: [
-          Tab(text: _loading ? 'Open Orders' : 'Open Orders (${_open.length})'),
-          Tab(text: _loading ? 'History (7d)' : 'History (${_history.length})'),
+          Tab(text: 'Open Orders (${open.length})'),
+          Tab(
+            text: _historyLoading
+                ? 'History (7d)'
+                : 'History (${_history.length})',
+          ),
         ],
       ),
     );
@@ -262,11 +313,12 @@ class _AccountDetailsSheetState extends State<AccountDetailsSheet> {
   Widget _buildTabContent({
     required bool isOpenView,
     required List<TradeOrder> orders,
+    required bool loading,
     required bool isDark,
     required String emptyText,
     required IconData emptyIcon,
   }) {
-    if (_loading) {
+    if (loading) {
       return const Center(child: CircularProgressIndicator());
     }
     if (orders.isEmpty) {

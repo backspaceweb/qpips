@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/repositories/auth_repository.dart';
+import 'package:qp_core/repositories/trader_live_state_controller.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
@@ -31,6 +32,19 @@ class TraderShell extends StatefulWidget {
 
 class _TraderShellState extends State<TraderShell> {
   TraderTab _active = TraderTab.discover;
+
+  @override
+  void initState() {
+    super.initState();
+    // Kick off the centralised live-state controller now that we know
+    // the trader is authenticated (the AuthGate gate above us has
+    // already verified the session). Idempotent — safe to call again
+    // if the shell rebuilds.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<TraderLiveStateController>().initialize();
+    });
+  }
 
   Widget _bodyFor(TraderTab tab) {
     switch (tab) {

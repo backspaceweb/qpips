@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/domain/active_follow.dart';
+import 'package:qp_core/repositories/trader_live_state_controller.dart';
 import 'package:qp_core/repositories/trader_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
@@ -57,6 +58,9 @@ class _MyFollowsScreenState extends State<MyFollowsScreen> {
     }
     if (!mounted) return;
     _refresh();
+    // Pause/resume flips the DB-side mirroring flag — the controller's
+    // status ticker doesn't carry that, so re-pull accounts to refresh.
+    context.read<TraderLiveStateController>().reloadAccounts();
   }
 
   Future<void> _unfollow(ActiveFollow follow) async {
@@ -65,6 +69,9 @@ class _MyFollowsScreenState extends State<MyFollowsScreen> {
     await context.read<TraderRepository>().unfollow(follow.slaveAccountId);
     if (!mounted) return;
     _refresh();
+    // Unfollow removes the slave; controller needs to drop it from
+    // the polled fleet.
+    context.read<TraderLiveStateController>().reloadAccounts();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -147,28 +154,52 @@ class _MyFollowsScreenState extends State<MyFollowsScreen> {
                     onRetry: _refresh,
                   );
                 }
-                final follows = snap.data ?? const <ActiveFollow>[];
-                if (follows.isEmpty) {
+                final baseFollows = snap.data ?? const <ActiveFollow>[];
+                if (baseFollows.isEmpty) {
                   return const _EmptyState();
                 }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    FollowsSummary(follows: follows),
-                    const SizedBox(height: AppSpacing.xl),
-                    for (final f in follows)
-                      Padding(
-                        padding:
-                            const EdgeInsets.only(bottom: AppSpacing.md),
-                        child: FollowRow(
-                          follow: f,
-                          onTogglePause: () => _togglePause(f),
-                          onUnfollow: () => _unfollow(f),
-                          onSettings: _comingSoonSettings,
-                          onOpenMaster: () => _openMasterProfile(f),
-                        ),
-                      ),
-                  ],
+                // Live overlay: rebuilds whenever the controller
+                // ticks. balance/equity/openPnl/todayPnl/openTrades
+                // come from the controller; identity + master display
+                // + isPaused come from the loaded follows.
+                return Consumer<TraderLiveStateController>(
+                  builder: (context, ctrl, _) {
+                    final follows = [
+                      for (final f in baseFollows)
+                        () {
+                          final serverId = int.tryParse(f.slaveAccountId);
+                          if (serverId == null) return f;
+                          final live = ctrl.liveFor(serverId);
+                          return f.copyWith(
+                            slaveBalance: live.balance,
+                            slaveEquity: live.equity,
+                            openPnl: live.openPnl,
+                            todayPnl: live.todayPnl,
+                            openTradesCount: live.openTradesCount,
+                          );
+                        }(),
+                    ];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FollowsSummary(follows: follows),
+                        const SizedBox(height: AppSpacing.xl),
+                        for (final f in follows)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: AppSpacing.md,
+                            ),
+                            child: FollowRow(
+                              follow: f,
+                              onTogglePause: () => _togglePause(f),
+                              onUnfollow: () => _unfollow(f),
+                              onSettings: _comingSoonSettings,
+                              onOpenMaster: () => _openMasterProfile(f),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
                 );
               },
             ),

@@ -50,7 +50,7 @@ class FollowsSummary extends StatelessWidget {
       _Card(
         label: 'Equity / Open',
         value:
-            '\$${totalEquity.toStringAsFixed(0)} · $totalOpenTrades trade'
+            '\$${totalEquity.toStringAsFixed(2)} · $totalOpenTrades trade'
             '${totalOpenTrades == 1 ? '' : 's'}',
       ),
     ];

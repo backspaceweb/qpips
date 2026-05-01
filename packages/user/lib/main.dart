@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/api/api_client_provider.dart';
+import 'package:qp_core/repositories/account_repository.dart';
 import 'package:qp_core/repositories/signal_directory_repository.dart';
+import 'package:qp_core/repositories/trader_live_state_controller.dart';
 import 'package:qp_core/repositories/trader_repository.dart';
 import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_theme.dart';
@@ -50,10 +52,13 @@ class UserApp extends StatelessWidget {
         // TradingRepository, AuthRepository, WalletRepository,
         // SubscriptionRepository, AccountRepository.
         ...ApiClientProvider.providers,
-        // Discover surface: real provider_listings join (E.1.3).
-        Provider<SignalDirectoryRepository>(
-          create: (_) =>
-              SupabaseSignalDirectoryRepository(Supabase.instance.client),
+        // Discover surface: real provider_listings join (E.1.3) +
+        // live trade-history aggregation on Provider Profile (E.3).
+        ProxyProvider<TradingRepository, SignalDirectoryRepository>(
+          update: (_, trading, __) => SupabaseSignalDirectoryRepository(
+            Supabase.instance.client,
+            trading: trading,
+          ),
         ),
         // My Follows / Configure Follow / Profile: real Supabase reads
         // (E.2.1). Live P&L / openTrades stay zero until the live-perf
@@ -63,6 +68,19 @@ class UserApp extends StatelessWidget {
             Supabase.instance.client,
             trading,
           ),
+        ),
+        // Centralised live-state polling (E.4) — single source of
+        // truth for openPnl / equity / status across Accounts +
+        // My Follows. TraderShell calls initialize() once we know
+        // the trader is authenticated.
+        ChangeNotifierProxyProvider2<AccountRepository, TradingRepository,
+            TraderLiveStateController>(
+          create: (ctx) => TraderLiveStateController(
+            ctx.read<AccountRepository>(),
+            ctx.read<TradingRepository>(),
+          ),
+          update: (_, accountRepo, trading, prev) =>
+              prev ?? TraderLiveStateController(accountRepo, trading),
         ),
       ],
       child: MaterialApp(

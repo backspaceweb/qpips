@@ -4,7 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../api/generated/api.swagger.dart';
 import '../domain/account.dart';
+import '../domain/live_performance.dart';
+import '../domain/master_listing.dart' show TimeWindow;
 import '../domain/order_control_settings.dart';
+import '../domain/provider_profile.dart';
 import '../domain/symbol_map.dart';
 import '../domain/trade_order.dart';
 
@@ -1183,6 +1186,303 @@ class TradingRepository {
       orders = orders.where((o) => !o.isBalanceEntry).toList();
     }
     return orders;
+  }
+
+  /// Aggregations of [account]'s trade history over [window]. Computed
+  /// client-side from a single getOrderHistory pull plus open positions
+  /// for the live tail of the equity curve. Returns null on API failure
+  /// so callers can fall back to operator-set snapshot values.
+  ///
+  /// MT4 / MT5 only — other platforms return null until their order
+  /// schemas are normalised against TradeOrder.
+  Future<MasterPerformance?> getMasterPerformance({
+    required Account account,
+    required TimeWindow window,
+  }) async {
+    if (account.platform != Platform.mt4 && account.platform != Platform.mt5) {
+      return null;
+    }
+    try {
+      final to = DateTime.now();
+      final from = to.subtract(window.duration);
+      final results = await Future.wait([
+        getOrderHistory(account: account, from: from, to: to),
+        getOpenOrders(account: account),
+      ]);
+      final history = results[0];
+      final openOrders = results[1];
+      if (history.isEmpty && openOrders.isEmpty) return null;
+
+      // Sort chronologically — the API returns rows newest-first, but
+      // equity curves need oldest-first.
+      final sorted = [...history]..sort((a, b) {
+          final at = a.lastUpdateTime ?? a.openTime ?? DateTime(0);
+          final bt = b.lastUpdateTime ?? b.openTime ?? DateTime(0);
+          return at.compareTo(bt);
+        });
+
+      // Walk the curve. Balance entries (deposits/withdrawals) shift
+      // both balance + equity. Trade entries shift only equity (the
+      // realised P&L lands on close, which is when history surfaces it).
+      double balance = 0;
+      double equity = 0;
+      double depositsAbs = 0;
+      double tradePnl = 0;
+      double peak = 0;
+      double maxDrawdown = 0;
+      final equityPoints = <EquityPoint>[];
+      final winners = <double>[];
+      final losers = <double>[];
+      final symbolVolume = <String, double>{};
+      final closedTrades = <TradingActivity>[];
+
+      for (final o in sorted) {
+        final ts = o.lastUpdateTime ?? o.openTime ?? to;
+        final pnl = o.profit + o.commission + o.swap;
+        double? deposit;
+        if (o.isBalanceEntry) {
+          deposit = o.profit;
+          balance += deposit;
+          equity += deposit;
+          depositsAbs += deposit.abs();
+        } else {
+          balance += pnl;
+          equity = balance;
+          tradePnl += pnl;
+          if (pnl > 0) winners.add(pnl);
+          if (pnl < 0) losers.add(pnl);
+          symbolVolume.update(
+            o.symbol.isEmpty ? 'Unknown' : o.symbol,
+            (v) => v + o.lots.abs(),
+            ifAbsent: () => o.lots.abs(),
+          );
+          closedTrades.add(
+            TradingActivity(
+              symbol: o.symbol,
+              direction: o.isBuy ? TradeDirection.buy : TradeDirection.sell,
+              lots: o.lots,
+              openTime: o.openTime ?? ts,
+              closeTime: ts,
+              pnl: pnl,
+            ),
+          );
+        }
+        if (equity > peak) peak = equity;
+        final dd = peak <= 0 ? 0.0 : (equity - peak);
+        if (dd < maxDrawdown) maxDrawdown = dd;
+        equityPoints.add(EquityPoint(
+          date: ts,
+          equity: equity,
+          balance: balance,
+          depositChange: deposit,
+        ));
+      }
+
+      // Gain fraction — divide trade P&L by total deposits when
+      // present, else by the absolute peak equity (so the number stays
+      // bounded for accounts with no captured deposits).
+      double gainFraction;
+      if (depositsAbs > 0) {
+        gainFraction = tradePnl / depositsAbs;
+      } else if (peak > 0) {
+        gainFraction = tradePnl / peak;
+      } else {
+        gainFraction = 0;
+      }
+      // Drawdown — peak-to-trough over the curve, expressed as a
+      // negative fraction relative to peak. Clamp to 0 if peak == 0
+      // (the curve never went positive).
+      final drawdownFraction = peak <= 0 ? 0.0 : (maxDrawdown / peak);
+
+      // Stats
+      final totalTrades = winners.length + losers.length;
+      final winRate = totalTrades == 0 ? 0.0 : winners.length / totalTrades;
+      final avgWin = winners.isEmpty
+          ? 0.0
+          : winners.reduce((a, b) => a + b) / winners.length;
+      final avgLoss = losers.isEmpty
+          ? 0.0
+          : losers.reduce((a, b) => a + b) / losers.length;
+      final grossProfit = winners.fold<double>(0, (s, v) => s + v);
+      final grossLoss = losers.fold<double>(0, (s, v) => s + v).abs();
+      final profitFactor = grossLoss == 0
+          ? (grossProfit == 0 ? 0 : double.infinity)
+          : grossProfit / grossLoss;
+      final avgHoldMinutes = closedTrades.isEmpty
+          ? 0
+          : closedTrades.fold<int>(
+                0,
+                (s, t) =>
+                    s +
+                    (t.closeTime ?? t.openTime).difference(t.openTime).inMinutes,
+              ) ~/
+              closedTrades.length;
+
+      // Win/loss streaks
+      var maxWinStreak = 0;
+      var maxLossStreak = 0;
+      var curWin = 0;
+      var curLoss = 0;
+      for (final t in closedTrades) {
+        if ((t.pnl ?? 0) > 0) {
+          curWin++;
+          curLoss = 0;
+          if (curWin > maxWinStreak) maxWinStreak = curWin;
+        } else if ((t.pnl ?? 0) < 0) {
+          curLoss++;
+          curWin = 0;
+          if (curLoss > maxLossStreak) maxLossStreak = curLoss;
+        }
+      }
+
+      // Open positions: surface as in-progress activity (closeTime
+      // null per existing TradingActivity convention) with floating
+      // P&L populated so the UI's P&L column shows live unrealised
+      // gain/loss instead of "—". They don't count toward closed-
+      // trade stats (winRate, profitFactor, etc).
+      final openTrades = <TradingActivity>[];
+      for (final o in openOrders) {
+        symbolVolume.update(
+          o.symbol.isEmpty ? 'Unknown' : o.symbol,
+          (v) => v + o.lots.abs(),
+          ifAbsent: () => o.lots.abs(),
+        );
+        openTrades.add(
+          TradingActivity(
+            symbol: o.symbol,
+            direction: o.isBuy ? TradeDirection.buy : TradeDirection.sell,
+            lots: o.lots,
+            openTime: o.openTime ?? to,
+            closeTime: null,
+            pnl: o.profit + o.commission + o.swap,
+          ),
+        );
+      }
+
+      // Symbol distribution → fraction
+      final totalVolume = symbolVolume.values
+          .fold<double>(0, (s, v) => s + v);
+      final symbolDistribution = totalVolume == 0
+          ? <String, double>{}
+          : {
+              for (final e in symbolVolume.entries) e.key: e.value / totalVolume,
+            };
+
+      // Recent activity = open positions first (most recent open),
+      // then most recent closed trades. Cap at 12 total to keep the
+      // table compact.
+      final activity = <TradingActivity>[
+        ...(openTrades..sort((a, b) => b.openTime.compareTo(a.openTime))),
+        ...closedTrades.reversed,
+      ].take(12).toList();
+
+      return MasterPerformance(
+        gainFraction: gainFraction,
+        drawdownFraction: drawdownFraction,
+        equityHistory: equityPoints,
+        stats: ProviderStats(
+          totalTrades: totalTrades,
+          winRate: winRate,
+          profitFactor: profitFactor.isFinite ? profitFactor.toDouble() : 0,
+          avgWin: avgWin,
+          avgLoss: avgLoss,
+          avgHoldTime: Duration(minutes: avgHoldMinutes),
+          maxWinStreak: maxWinStreak,
+          maxLossStreak: maxLossStreak,
+        ),
+        recentActivity: activity,
+        symbolDistribution: symbolDistribution,
+      );
+    } catch (e) {
+      if (kDebugMode) print('getMasterPerformance error: $e');
+      return null;
+    }
+  }
+
+  /// Live snapshot for any account (master or slave): synthetic
+  /// balance + equity + P&L breakdowns + open trade count. Single
+  /// all-time history pull plus open orders; today's P&L is filtered
+  /// client-side from the same history list. Falls back to
+  /// [SlaveLiveState.empty] on any failure so callers render without
+  /// nulls.
+  Future<SlaveLiveState> getAccountLiveState({required Account account}) async {
+    if (account.platform != Platform.mt4 && account.platform != Platform.mt5) {
+      return SlaveLiveState.empty;
+    }
+    try {
+      final now = DateTime.now();
+      final midnightUtc = DateTime.utc(
+        now.toUtc().year,
+        now.toUtc().month,
+        now.toUtc().day,
+      );
+      // 2020-01-01 = soft floor; covers any account that joined
+      // QuantumPips post-launch. Trading API silently truncates if
+      // it can't honor the full range — that's the documented caveat
+      // on SlaveLiveState.balance.
+      final historyEpoch = DateTime(2020, 1, 1);
+      final results = await Future.wait([
+        getOpenOrders(account: account),
+        getOrderHistory(
+          account: account,
+          from: historyEpoch,
+          to: now,
+        ),
+      ]);
+      final open = results[0];
+      final history = results[1];
+
+      double balance = 0;
+      double todayPnl = 0;
+      for (final o in history) {
+        final pnl = o.profit + o.commission + o.swap;
+        balance += pnl;
+        if (!o.isBalanceEntry) {
+          final closedAt = o.lastUpdateTime ?? o.openTime;
+          if (closedAt != null && !closedAt.toUtc().isBefore(midnightUtc)) {
+            todayPnl += pnl;
+          }
+        }
+      }
+
+      double openPnl = 0;
+      for (final o in open) {
+        openPnl += o.profit + o.commission + o.swap;
+      }
+
+      return SlaveLiveState(
+        balance: balance,
+        equity: balance + openPnl,
+        openPnl: openPnl,
+        todayPnl: todayPnl,
+        openTradesCount: open.length,
+      );
+    } catch (e) {
+      if (kDebugMode) print('getAccountLiveState error: $e');
+      return SlaveLiveState.empty;
+    }
+  }
+
+  /// Per-account broker connection status. Returns a map keyed by
+  /// trading-API serverId; missing entries indicate the API didn't
+  /// respond for that id. The status string is whatever the trading
+  /// server reports — empirically observed values like "Connected" /
+  /// "Disconnected"; UI should treat unknown strings as raw labels.
+  Future<Map<int, String>> getAccountStatuses({
+    required List<int> serverIds,
+  }) async {
+    if (serverIds.isEmpty) return const {};
+    try {
+      final resp = await _api.apiV1GetStatusbyIDGet(userId: serverIds);
+      final body = resp.body ?? const <UserStatusDto>[];
+      return {
+        for (final s in body)
+          if (s.userId != null && s.status != null) s.userId!: s.status!,
+      };
+    } catch (e) {
+      if (kDebugMode) print('getAccountStatuses error: $e');
+      return const {};
+    }
   }
 
   /// Full list of tradable symbols available to [account] on its broker.

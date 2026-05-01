@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:qp_core/domain/active_follow.dart';
@@ -45,11 +47,39 @@ class ProviderProfileScreen extends StatefulWidget {
 class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
   TimeWindow _window = TimeWindow.month;
   late Future<_ProfileLoad> _future;
+  _ProfileLoad? _live;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+    // Auto-refresh every 10s while the profile is open. Each tick
+    // refetches the full ProviderProfile (open orders + history +
+    // active follows) — heavier than per-tick openOrders polling
+    // elsewhere, but the screen is short-lived so the per-account
+    // load is bounded.
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _silentRefresh(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _silentRefresh() async {
+    if (!mounted) return;
+    try {
+      final fresh = await _load();
+      if (!mounted) return;
+      setState(() => _live = fresh);
+    } catch (_) {
+      // Swallow — UI keeps last known values; next tick retries.
+    }
   }
 
   /// Loads the profile + counts how many of the trader's slaves are
@@ -76,6 +106,9 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
     setState(() {
       _window = w;
       _future = _load();
+      // Window changed — drop the live snapshot since it was
+      // computed against the old window. Next tick will repopulate.
+      _live = null;
     });
   }
 
@@ -99,7 +132,10 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
               onBack: () => Navigator.of(context).pop(),
             );
           }
-          final load = snap.data!;
+          // Render live data when the auto-refresh tick has produced
+          // a newer snapshot; fall back to the initial-load snapshot
+          // until then.
+          final load = _live ?? snap.data!;
           return _ProfileBody(
             profile: load.profile,
             existingFollowsCount: load.existingFollowsCount,

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../domain/account.dart';
 import '../domain/master_listing.dart';
 import '../domain/provider_profile.dart';
+import 'trading_repository.dart';
 
 /// Reads the public signal-provider directory.
 ///
@@ -430,6 +431,7 @@ class MockSignalDirectoryRepository implements SignalDirectoryRepository {
 /// and not blocking the directory rollout.
 class SupabaseSignalDirectoryRepository implements SignalDirectoryRepository {
   final SupabaseClient _supabase;
+  final TradingRepository? _trading;
   final bool mergeMockCards;
 
   // Reuses the mock generators for the deeper profile surfaces and the
@@ -437,10 +439,15 @@ class SupabaseSignalDirectoryRepository implements SignalDirectoryRepository {
   final MockSignalDirectoryRepository _mockGen =
       MockSignalDirectoryRepository();
 
+  /// [_trading] is optional so consumers that don't need live perf
+  /// (anonymous Discover preview, tests) can still use the repo. When
+  /// null, getProvider returns the listing summary + seeded deeper
+  /// surfaces without a trade-history round trip.
   SupabaseSignalDirectoryRepository(
     this._supabase, {
+    TradingRepository? trading,
     this.mergeMockCards = true,
-  });
+  }) : _trading = trading;
 
   @override
   Future<List<MasterListing>> listMasters({
@@ -521,7 +528,51 @@ class SupabaseSignalDirectoryRepository implements SignalDirectoryRepository {
     final summary =
         _toMasterListing(list.first as Map<String, dynamic>);
 
-    // Deeper surfaces still mocked — see class doc.
+    // Live aggregation from real trade history when we have a
+    // TradingRepository and a known masterAccountId. Falls back to
+    // operator-set snapshot values + seeded deeper surfaces on null.
+    if (_trading != null && summary.masterAccountId != null) {
+      final perf = await _trading.getMasterPerformance(
+        account: Account(
+          serverId: summary.masterAccountId!,
+          loginNumber: summary.masterAccountId!.toString(),
+          accountName: summary.displayName,
+          accountType: AccountType.master,
+          platform: summary.platform,
+        ),
+        window: window,
+      );
+      if (perf != null) {
+        return ProviderProfile(
+          summary: MasterListing(
+            id: summary.id,
+            masterAccountId: summary.masterAccountId,
+            displayName: summary.displayName,
+            avatarUrl: summary.avatarUrl,
+            tagline: summary.tagline,
+            platform: summary.platform,
+            broker: summary.broker,
+            followers: summary.followers,
+            tier: summary.tier,
+            // Live values override the operator-set snapshot for the
+            // window the trader picked.
+            gainFraction: perf.gainFraction,
+            drawdownFraction: perf.drawdownFraction,
+            riskScore: summary.riskScore,
+            sparkline: _sparklineFromEquity(perf.equityHistory),
+            currency: summary.currency,
+            minDeposit: summary.minDeposit,
+            tradingSince: summary.tradingSince,
+          ),
+          equityHistory: perf.equityHistory,
+          stats: perf.stats,
+          symbolDistribution: perf.symbolDistribution,
+          recentActivity: perf.recentActivity,
+        );
+      }
+    }
+
+    // Deeper surfaces still mocked — fallback path.
     final providerIndexSeed = id.hashCode & 0x7fffffff;
     return ProviderProfile(
       summary: summary,
@@ -538,6 +589,25 @@ class SupabaseSignalDirectoryRepository implements SignalDirectoryRepository {
         Random(_mockGen._seedFor('act-$id')),
       ),
     );
+  }
+
+  /// Down-samples an equity curve to a fixed-length sparkline. Picks
+  /// `length` evenly-spaced points and normalises to 0..1 so the
+  /// painter doesn't care about absolute values.
+  List<double> _sparklineFromEquity(
+    List<EquityPoint> equity, {
+    int length = 16,
+  }) {
+    if (equity.isEmpty) return List.filled(length, 0.5);
+    final values = <double>[];
+    for (var i = 0; i < length; i++) {
+      final idx = (i * (equity.length - 1) / (length - 1)).round();
+      values.add(equity[idx].equity);
+    }
+    final lo = values.reduce(min);
+    final hi = values.reduce(max);
+    final span = (hi - lo).abs() < 1e-6 ? 1.0 : (hi - lo);
+    return values.map((v) => (v - lo) / span).toList();
   }
 
   MasterListing _toMasterListing(Map<String, dynamic> row) {

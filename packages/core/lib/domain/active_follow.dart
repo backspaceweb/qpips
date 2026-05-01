@@ -79,7 +79,14 @@ class ActiveFollow {
     required this.isPaused,
   });
 
-  ActiveFollow copyWith({bool? isPaused}) {
+  ActiveFollow copyWith({
+    bool? isPaused,
+    double? slaveBalance,
+    double? slaveEquity,
+    double? openPnl,
+    double? todayPnl,
+    int? openTradesCount,
+  }) {
     return ActiveFollow(
       slaveAccountId: slaveAccountId,
       masterId: masterId,
@@ -89,14 +96,14 @@ class ActiveFollow {
       slavePlatform: slavePlatform,
       slaveBroker: slaveBroker,
       slaveLoginNumber: slaveLoginNumber,
-      slaveBalance: slaveBalance,
-      slaveEquity: slaveEquity,
+      slaveBalance: slaveBalance ?? this.slaveBalance,
+      slaveEquity: slaveEquity ?? this.slaveEquity,
       slaveCurrency: slaveCurrency,
       masterDisplayName: masterDisplayName,
       masterTier: masterTier,
-      openPnl: openPnl,
-      todayPnl: todayPnl,
-      openTradesCount: openTradesCount,
+      openPnl: openPnl ?? this.openPnl,
+      todayPnl: todayPnl ?? this.todayPnl,
+      openTradesCount: openTradesCount ?? this.openTradesCount,
       isPaused: isPaused ?? this.isPaused,
     );
   }

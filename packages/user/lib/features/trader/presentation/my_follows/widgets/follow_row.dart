@@ -256,8 +256,11 @@ class _LiveSnapshot extends StatelessWidget {
           value: '${follow.openTradesCount}',
         ),
         _Metric(
-          label: 'Equity',
-          value: '\$${follow.slaveEquity.toStringAsFixed(0)}',
+          label: 'Equity (net)',
+          value: '\$${follow.slaveEquity.toStringAsFixed(2)}',
+          tooltip: 'Net since QuantumPips registration. The trading API '
+              "doesn't expose live balance — value is reconstructed from "
+              'deposits + realised P&L + open P&L on QuantumPips.',
         ),
       ],
     );
@@ -269,27 +272,47 @@ class _Metric extends StatelessWidget {
   final String value;
   final Color? valueColor;
   final bool prominent;
+  final String? tooltip;
 
   const _Metric({
     required this.label,
     required this.value,
     this.valueColor,
     this.prominent = false,
+    this.tooltip,
   });
 
   @override
   Widget build(BuildContext context) {
+    final labelText = Text(
+      label.toUpperCase(),
+      style: AppTypography.labelSmall.copyWith(
+        color: AppColors.textMuted,
+        fontSize: 9,
+      ),
+    );
+    final labelWidget = tooltip == null
+        ? labelText
+        : Tooltip(
+            message: tooltip!,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                labelText,
+                const SizedBox(width: 2),
+                Icon(
+                  Icons.info_outline,
+                  size: 10,
+                  color: AppColors.textMuted,
+                ),
+              ],
+            ),
+          );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label.toUpperCase(),
-          style: AppTypography.labelSmall.copyWith(
-            color: AppColors.textMuted,
-            fontSize: 9,
-          ),
-        ),
+        labelWidget,
         const SizedBox(height: 2),
         Text(
           value,
