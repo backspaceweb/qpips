@@ -7,6 +7,9 @@ import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 
+import 'account_details_sheet.dart';
+import 'slave_settings_dialog.dart';
+
 /// Accounts table — search + platform filter + sortable rows.
 ///
 /// Search is local (substring on display name + login). Platform filter
@@ -240,7 +243,7 @@ class _HeaderRow extends StatelessWidget {
           Expanded(flex: 2, child: Text('BALANCE', style: style)),
           Expanded(flex: 2, child: Text('CONNECTION', style: style)),
           Expanded(flex: 2, child: Text('STATUS', style: style)),
-          SizedBox(width: 80, child: Text('ACTIONS', style: style)),
+          SizedBox(width: 140, child: Text('ACTIONS', style: style)),
         ],
       ),
     );
@@ -258,6 +261,35 @@ class _AccountRow extends StatefulWidget {
 
 class _AccountRowState extends State<_AccountRow> {
   bool _deleting = false;
+
+  Account _toAccount() {
+    final acc = widget.account;
+    return Account(
+      serverId: acc.tradingAccountId,
+      loginNumber: acc.loginNumber,
+      accountName: acc.effectiveLabel,
+      accountType: acc.accountType,
+      platform: acc.platform,
+    );
+  }
+
+  void _openSettings() {
+    showDialog<void>(
+      context: context,
+      barrierColor: AppColors.overlay,
+      builder: (_) => SlaveSettingsDialog(account: _toAccount()),
+    );
+  }
+
+  void _openDetails() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: AppColors.overlay,
+      builder: (_) => AccountDetailsSheet(account: _toAccount()),
+    );
+  }
 
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
@@ -386,7 +418,7 @@ class _AccountRowState extends State<_AccountRow> {
             child: _StatusPill(disabled: acc.mirroringDisabled),
           ),
           SizedBox(
-            width: 80,
+            width: 140,
             child: _deleting
                 ? const Center(
                     child: SizedBox(
@@ -398,17 +430,41 @@ class _AccountRowState extends State<_AccountRow> {
                       ),
                     ),
                   )
-                : Align(
-                    alignment: Alignment.centerLeft,
-                    child: IconButton(
-                      icon: const Icon(
-                        Icons.delete_outline,
-                        size: 18,
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Info — open orders + trade history (both roles).
+                      IconButton(
+                        icon: const Icon(
+                          Icons.info_outline,
+                          size: 18,
+                        ),
+                        color: AppColors.textMuted,
+                        onPressed: _openDetails,
+                        tooltip: 'Open orders + history',
                       ),
-                      color: AppColors.textMuted,
-                      onPressed: _confirmDelete,
-                      tooltip: 'Delete account',
-                    ),
+                      // Gear (Slave Settings) — only on slaves; masters
+                      // don't have follow-side risk/order-control settings.
+                      if (acc.accountType == AccountType.slave)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.settings_outlined,
+                            size: 18,
+                          ),
+                          color: AppColors.textMuted,
+                          onPressed: _openSettings,
+                          tooltip: 'Slave settings',
+                        ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          size: 18,
+                        ),
+                        color: AppColors.textMuted,
+                        onPressed: _confirmDelete,
+                        tooltip: 'Delete account',
+                      ),
+                    ],
                   ),
           ),
         ],

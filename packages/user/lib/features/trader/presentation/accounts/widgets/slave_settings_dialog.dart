@@ -7,26 +7,33 @@ import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_core/api/generated/api.swagger.dart';
 import 'package:qp_design/app_colors.dart';
 
-/// Per-slave settings dialog. Two tabs:
-///   1. Risk & Stops — risk multiplier, copy SL/TP, scalper mode, order filter
-///   2. Order Control — auto-close triggers, equity bands, pending-order limits
+/// Per-slave settings dialog (trader-app version).
+///
+/// Three tabs:
+///   1. Risk & Stops    — risk multiplier, copy SL/TP, scalper mode, order filter
+///   2. Order Control   — auto-close triggers, equity bands, pending-order limits
+///   3. Symbols         — suffix / special symbol mappings
 ///
 /// Backed by `getRiskSettings` + `getOrderControlSettings` (read on open)
-/// and `updateRiskSettings` + `updateOrderControlSettings` (write on save).
+/// and `updateRiskSettings` + `updateOrderControlSettings` (write on save),
+/// plus `addSymbolMap` + `getSuffix/Special Mappings` for the Symbols tab.
 /// Dispatches MT4/MT5 internally based on the passed [Account].
 ///
-/// Class name kept as `Mt5RiskDialog` for backward compatibility with the
-/// dashboard import; the dialog itself works for both MT4 and MT5 slaves.
-class Mt5RiskDialog extends StatefulWidget {
+/// Caller is expected to scope the [Account] to one the trader OWNS —
+/// the AccountsTable only surfaces the gear icon on rows in
+/// account_ownership for the current trader. The trading proxy doesn't
+/// yet enforce ownership on update endpoints; treat the UI scoping as
+/// the boundary until proxy-side ownership checks land.
+class SlaveSettingsDialog extends StatefulWidget {
   final Account account;
 
-  const Mt5RiskDialog({super.key, required this.account});
+  const SlaveSettingsDialog({super.key, required this.account});
 
   @override
-  State<Mt5RiskDialog> createState() => _Mt5RiskDialogState();
+  State<SlaveSettingsDialog> createState() => _SlaveSettingsDialogState();
 }
 
-class _Mt5RiskDialogState extends State<Mt5RiskDialog> {
+class _SlaveSettingsDialogState extends State<SlaveSettingsDialog> {
   bool _isLoading = true;
   bool _isSaving = false;
 

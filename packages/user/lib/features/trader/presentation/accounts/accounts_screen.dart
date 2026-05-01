@@ -131,6 +131,9 @@ class _AccountsScreenState extends State<AccountsScreen> {
             }
             final data = snap.data!;
             final visible = _applyFilters(data.accounts);
+            final inactiveCount = data.accounts
+                .where((a) => a.mirroringDisabled)
+                .length;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -138,6 +141,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
                   usage: data.usage,
                   onAddPressed: () => _openAddDialog(data),
                 ),
+                if (inactiveCount > 0) ...[
+                  const SizedBox(height: AppSpacing.lg),
+                  _InactiveBanner(count: inactiveCount),
+                ],
                 const SizedBox(height: AppSpacing.xl),
                 AccountsStatsGrid(accounts: data.accounts),
                 const SizedBox(height: AppSpacing.xl),
@@ -241,6 +248,55 @@ class _ErrorBlock extends StatelessWidget {
           Text(message, style: AppTypography.bodySmall),
           const SizedBox(height: AppSpacing.lg),
           TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    );
+  }
+}
+
+/// Warning banner shown above the stats grid when one or more of the
+/// trader's accounts have `mirroring_disabled = true`. Coverage drops
+/// the oldest accounts first when slot subs expire (or when the trader
+/// over-registers); buying a new sub from Plans automatically
+/// reactivates them via the enforce_slot_coverage trigger.
+class _InactiveBanner extends StatelessWidget {
+  final int count;
+  const _InactiveBanner({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(
+          color: AppColors.warning.withValues(alpha: 0.40),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: AppColors.warning,
+            size: 20,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              '$count account${count == 1 ? ' is' : 's are'} inactive — '
+              'your active slots cover fewer accounts than you have '
+              'registered. Buy more slots from Plans to reactivate '
+              '${count == 1 ? 'it' : 'them'}, or remove the inactive '
+              'account${count == 1 ? '' : 's'}. Inactive accounts '
+              "stay registered but won't mirror new trades.",
+              style: AppTypography.bodySmall.copyWith(
+                color: AppColors.textPrimary,
+                height: 1.5,
+              ),
+            ),
+          ),
         ],
       ),
     );

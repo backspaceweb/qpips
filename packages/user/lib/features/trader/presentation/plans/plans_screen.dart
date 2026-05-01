@@ -10,6 +10,8 @@ import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 
+import '../wallet/widgets/top_up_sheet.dart';
+
 /// Plans tab — three pricing cards side-by-side (Start / Pro / Premium).
 ///
 /// Renders as a tab body inside [TraderShell] (no AppBar of its own —
@@ -272,6 +274,24 @@ class _WalletHeader extends StatelessWidget {
               fontSize: 18,
               color: AppColors.primary,
               fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          ElevatedButton.icon(
+            onPressed: () => showTopUpSheet(context),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Top up'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.textOnDark,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.sm,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              ),
+              textStyle: AppTypography.labelLarge.copyWith(fontSize: 13),
             ),
           ),
         ],
