@@ -143,6 +143,125 @@ function matchUpdate(path: string): boolean {
   );
 }
 
+// Paths that don't address a specific trading account — global
+// lookups, ticker reads, etc. These bypass the ownership gate. Add
+// new global endpoints here as they're wired up.
+const GLOBAL_READ_PATHS: ReadonlySet<string> = new Set([
+  "/api/v1/getAPIInfo",
+]);
+
+function isGlobalRead(path: string): boolean {
+  if (GLOBAL_READ_PATHS.has(path)) return true;
+  // Symbol catalogues — per-platform but not per-account.
+  if (path.startsWith("/api/v1/getAllSymbol")) return true;
+  if (path.startsWith("/api/v1/getSymbols")) return true;
+  return false;
+}
+
+// Returns the trading-server serverId(s) that a request targets, so
+// the ownership gate can verify the caller is allowed to address them.
+//
+//   - DELETE /follow/{N} | /source/{N}      → [N]
+//   - POST   /active_*?id=N                 → [N]
+//   - POST   /update_*?userId=N             → [N]   (post-E.1.1, the
+//                                               update endpoint's
+//                                               `userId` is the
+//                                               trading-API serverId,
+//                                               not the broker login)
+//   - POST   /register_slave_*?masterId=N   → [N]   (the master being
+//                                               followed; the slave's
+//                                               own `userId` query
+//                                               param is the broker
+//                                               login, not a serverId,
+//                                               so it's excluded)
+//   - GET    *anything-else*?userId=N       → [N]   (read paths —
+//                                               openOrders, history,
+//                                               balance, etc — all
+//                                               address an account by
+//                                               serverId in `userId`)
+//   - getAPIInfo / getAllSymbols / etc.     → []
+//
+// Non-numeric or missing values are dropped silently.
+function targetedServerIds(
+  method: string,
+  path: string,
+  search: URLSearchParams,
+  registerMatch: RegisterMatch | null,
+): number[] {
+  if (isGlobalRead(path)) return [];
+
+  const ids: number[] = [];
+  const pushNumeric = (raw: string | null) => {
+    if (raw === null) return;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) ids.push(n);
+  };
+
+  if (method === "DELETE") {
+    const m = path.match(/^\/api\/v1\/(?:follow|source)\/(\d+)$/);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n)) ids.push(n);
+    }
+    return ids;
+  }
+
+  if (registerMatch) {
+    if (registerMatch.accountType === "slave") {
+      pushNumeric(search.get("masterId"));
+    }
+    return ids;
+  }
+
+  if (matchActivate(path)) {
+    pushNumeric(search.get("id"));
+    return ids;
+  }
+
+  if (matchUpdate(path)) {
+    pushNumeric(search.get("userId"));
+    return ids;
+  }
+
+  // Default: read paths. Most use `userId` for the targeted serverId.
+  pushNumeric(search.get("userId"));
+  return ids;
+}
+
+// True if the caller either owns the account_ownership row for
+// `serverId`, OR `serverId` is an approved public provider listing.
+// Either-or covers all legit access patterns:
+//   - own slave / own master → owned
+//   - public master a trader is following or browsing → approved
+//     listing
+async function isCallerAllowedForAccount(
+  serverId: number,
+  userClient: ReturnType<typeof createClient>,
+): Promise<boolean> {
+  const { data: own, error: ownErr } = await userClient
+    .from("account_ownership")
+    .select("trading_account_id")
+    .eq("trading_account_id", serverId)
+    .limit(1);
+  if (ownErr) {
+    console.error("ownership probe failed:", ownErr);
+    return false;
+  }
+  if ((own ?? []).length > 0) return true;
+
+  const { data: listing, error: listErr } = await userClient
+    .from("provider_listings")
+    .select("master_account_id")
+    .eq("master_account_id", serverId)
+    .eq("status", "approved")
+    .limit(1);
+  if (listErr) {
+    console.error("listing probe failed:", listErr);
+    return false;
+  }
+  return (listing ?? []).length > 0;
+}
+
 Deno.serve(async (req) => {
   // CORS preflight
   if (req.method === "OPTIONS") {
@@ -187,9 +306,42 @@ Deno.serve(async (req) => {
   const proxyPath = url.pathname.slice(apiIdx);
 
   // ---------------------------------------------------------------
-  // Slot-quota gate — only on POST /register* endpoints.
+  // Ownership gate — refuse any request that addresses a serverId
+  // the caller doesn't own and that isn't an approved public master.
+  // Closes the read-side privacy hole: pre-E.3 the proxy verified
+  // the JWT but blindly forwarded reads, so an authenticated trader
+  // could query other traders' account state by guessing a serverId.
   // ---------------------------------------------------------------
   const registerMatch = req.method === "POST" ? matchRegister(proxyPath) : null;
+  {
+    const targets = targetedServerIds(
+      req.method,
+      proxyPath,
+      url.searchParams,
+      registerMatch,
+    );
+    for (const serverId of targets) {
+      // Sequential rather than parallel to keep the failure path simple
+      // — most requests target one serverId; the few that don't (e.g.
+      // future bulk endpoints) can be revisited if latency matters.
+      // eslint-disable-next-line no-await-in-loop
+      const ok = await isCallerAllowedForAccount(serverId, userClient);
+      if (!ok) {
+        return json(
+          {
+            error:
+              `Forbidden: account ${serverId} is not yours and is not ` +
+              `an approved public master.`,
+          },
+          403,
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Slot-quota gate — only on POST /register* endpoints.
+  // ---------------------------------------------------------------
   if (registerMatch) {
     const { data: usage, error: usageErr } = await userClient.rpc(
       "get_my_slot_usage",
