@@ -150,7 +150,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 const SizedBox(height: AppSpacing.xl),
                 AccountsTable(
                   accounts: visible,
-                  totalCount: data.accounts.length,
+                  allAccounts: data.accounts,
                   search: _search,
                   platformFilter: _platformFilter,
                   onSearchChanged: (s) => setState(() => _search = s),

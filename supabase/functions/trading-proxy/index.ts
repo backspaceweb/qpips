@@ -118,6 +118,31 @@ function matchDeleteId(path: string): bigint | null {
   }
 }
 
+// Matches the trading API's activate/deactivate endpoints. Today only
+// MT4 + MT5 are supported in the trader UI; other platforms 404 the
+// activate path on the API side anyway.
+function matchActivate(path: string): boolean {
+  return (
+    path === "/api/v1/active_master/MT4" ||
+    path === "/api/v1/active_slave/MT4" ||
+    path === "/api/v1/active_master/MT5" ||
+    path === "/api/v1/active_slave/MT5"
+  );
+}
+
+// Matches the trading API's update_* endpoints. Today only MT4 + MT5
+// are wired in the trader UI. The path casing on the trading API is
+// inconsistent (update_Master_mt4 vs update_slave_mt4), so we match
+// both shapes verbatim.
+function matchUpdate(path: string): boolean {
+  return (
+    path === "/api/v1/update_Master_mt4" ||
+    path === "/api/v1/update_slave_mt4" ||
+    path === "/api/v1/update_Master_mt5" ||
+    path === "/api/v1/update_slave_mt5"
+  );
+}
+
 Deno.serve(async (req) => {
   // CORS preflight
   if (req.method === "OPTIONS") {
@@ -267,22 +292,29 @@ Deno.serve(async (req) => {
       const loginParam = url.searchParams.get("userId") ?? "";
       let serverId: number | null = null;
       try {
-        const parsed = JSON.parse(bodyText) as {
-          data?: unknown;
-          success?: unknown;
-        };
-        // Even on HTTP 200, the trading API returns success:false on
-        // logical failures. Skip the ownership write in that case.
-        if (parsed.success === false) {
-          // pass — no insert
-        } else {
-          const dataField = parsed.data;
-          if (typeof dataField === "number" && Number.isFinite(dataField)) {
-            serverId = dataField;
-          } else if (typeof dataField === "string") {
-            const n = Number(dataField);
-            if (Number.isFinite(n) && n > 0) serverId = n;
-          }
+        const parsed = JSON.parse(bodyText) as Record<string, unknown>;
+        // Trading API returns one of two shapes on HTTP 200:
+        //   master: { data: <id>, success: true, ... }
+        //   slave:  { value: { data: <id>, success: false, ... } }
+        // The slave wrapper's `success: false` lies — registration
+        // genuinely succeeded, the account is queryable on their side,
+        // and `data` carries a valid numeric id. So we unwrap `value`
+        // when present and trust the numeric `data` field over the
+        // `success` flag.
+        const inner =
+          typeof parsed.value === "object" && parsed.value !== null
+            ? (parsed.value as Record<string, unknown>)
+            : parsed;
+        const dataField = inner.data;
+        if (
+          typeof dataField === "number" &&
+          Number.isFinite(dataField) &&
+          dataField > 0
+        ) {
+          serverId = dataField;
+        } else if (typeof dataField === "string") {
+          const n = Number(dataField);
+          if (Number.isFinite(n) && n > 0) serverId = n;
         }
       } catch (e) {
         console.error(
@@ -326,6 +358,68 @@ Deno.serve(async (req) => {
       status: upstream.status,
       headers: responseHeaders,
     });
+  }
+
+  // ---------------------------------------------------------------
+  // Activate / deactivate: trading API toggles mirroring on its side,
+  // we mirror the new state into account_ownership.mirroring_disabled
+  // so the UI's STATUS pill stays in sync. Query params: id, status.
+  // (status=true → active → mirroring_disabled=false, and vice versa.)
+  // ---------------------------------------------------------------
+  if (req.method === "POST" && upstream.ok && matchActivate(proxyPath)) {
+    const idParam = url.searchParams.get("id") ?? "";
+    const statusParam = url.searchParams.get("status") ?? "";
+    if (idParam !== "" && (statusParam === "true" || statusParam === "false")) {
+      const adminClient = createClient(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY,
+      );
+      const { error: updErr } = await adminClient
+        .from("account_ownership")
+        .update({ mirroring_disabled: statusParam !== "true" })
+        .eq("trading_account_id", idParam)
+        .eq("user_id", user.id);
+      if (updErr) {
+        console.error(
+          `account_ownership mirroring update failed (id=${idParam}, ` +
+            `status=${statusParam}):`,
+          updErr,
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Update: trading API rotates password/server/comment for an
+  // existing master or slave. We never persist password or server,
+  // but `comment` is the trader-facing label so we mirror it into
+  // account_ownership.display_name. The API's `userId` query param
+  // here is the internal serverId (different semantics from register),
+  // so we match the row on trading_account_id AND user_id — a trader
+  // can't relabel someone else's row by guessing a serverId.
+  // ---------------------------------------------------------------
+  if (req.method === "POST" && upstream.ok && matchUpdate(proxyPath)) {
+    const serverIdParam = url.searchParams.get("userId") ?? "";
+    const commentParam = url.searchParams.get("comment");
+    if (serverIdParam !== "" && commentParam !== null) {
+      const adminClient = createClient(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY,
+      );
+      const trimmed = commentParam.trim();
+      const { error: updErr } = await adminClient
+        .from("account_ownership")
+        .update({ display_name: trimmed === "" ? null : trimmed })
+        .eq("trading_account_id", serverIdParam)
+        .eq("user_id", user.id);
+      if (updErr) {
+        console.error(
+          `account_ownership display_name update failed ` +
+            `(serverId=${serverIdParam}):`,
+          updErr,
+        );
+      }
+    }
   }
 
   // ---------------------------------------------------------------

@@ -8,6 +8,27 @@ import '../domain/order_control_settings.dart';
 import '../domain/symbol_map.dart';
 import '../domain/trade_order.dart';
 
+/// Result of [TradingRepository.switchSlaveMaster]. Identifies which
+/// step failed when the operation didn't complete cleanly so the UI
+/// can recover (a register-stage failure leaves the slave unbound).
+enum SwitchMasterStage { delete, register }
+
+class SwitchMasterResult {
+  final bool success;
+  final SwitchMasterStage? failedStage;
+  final String? errorMessage;
+
+  const SwitchMasterResult.ok()
+      : success = true,
+        failedStage = null,
+        errorMessage = null;
+
+  const SwitchMasterResult.error(SwitchMasterStage stage, String message)
+      : success = false,
+        failedStage = stage,
+        errorMessage = message;
+}
+
 class TradingRepository {
   final Api _api;
   final _supabase = Supabase.instance.client;
@@ -130,6 +151,181 @@ class TradingRepository {
     } catch (e) {
       if (kDebugMode) print('toggleAccountActivation error: $e');
       return false;
+    }
+  }
+
+  /// Update credentials + display name for an existing master/slave on
+  /// the trading server. The trading API requires `password` and
+  /// `server` on every update (we never persist either). The `userId`
+  /// query param here is the trading API's internal serverId (NOT the
+  /// broker login — different semantics from register, which used the
+  /// broker login). The Edge Function mirrors the new `comment` into
+  /// `account_ownership.display_name` after a successful response.
+  ///
+  /// Dispatches MT4/MT5 by [account.platform]; other platforms return
+  /// `false` for now (UI greys out the edit button on those rows).
+  Future<bool> updateTradingAccount({
+    required Account account,
+    required String password,
+    required String server,
+    String? comment,
+  }) async {
+    try {
+      Response<StringResponseDto> response;
+      switch (account.platform) {
+        case Platform.mt5:
+          response = account.isMaster
+              ? await _api.apiV1UpdateMasterMt5Post(
+                  userId: account.serverId,
+                  password: password,
+                  server: server,
+                  comment: comment,
+                )
+              : await _api.apiV1UpdateSlaveMt5Post(
+                  userId: account.serverId,
+                  password: password,
+                  server: server,
+                  comment: comment,
+                );
+          break;
+        case Platform.mt4:
+          response = account.isMaster
+              ? await _api.apiV1UpdateMasterMt4Post(
+                  userId: account.serverId,
+                  password: password,
+                  server: server,
+                  comment: comment,
+                )
+              : await _api.apiV1UpdateSlaveMt4Post(
+                  userId: account.serverId,
+                  password: password,
+                  server: server,
+                  comment: comment,
+                );
+          break;
+        default:
+          if (kDebugMode) {
+            print(
+              'updateTradingAccount: ${account.platform.wireValue} not yet supported',
+            );
+          }
+          return false;
+      }
+      return response.isSuccessful;
+    } catch (e) {
+      if (kDebugMode) print('updateTradingAccount error: $e');
+      return false;
+    }
+  }
+
+  /// Switch a slave from its current master to a different one.
+  ///
+  /// The trading API has no rebind endpoint, so this is two calls:
+  ///   1) DELETE `/api/v1/follow/{slaveServerId}` — frees the slot,
+  ///      drops the account_ownership row.
+  ///   2) POST /api/v1/register_slave_* with the new masterId — writes
+  ///      a new account_ownership row with the same broker login but
+  ///      a fresh serverId.
+  ///
+  /// Failure modes:
+  ///   - Delete fails: nothing changed, [SwitchMasterStage.delete] error.
+  ///   - Register fails after delete: slave is unbound — caller must
+  ///     surface a recovery prompt. [SwitchMasterStage.register].
+  ///
+  /// MT4/MT5 only. Newly-registered serverId comes back through the
+  /// Edge Function's normal register-side ownership write.
+  Future<SwitchMasterResult> switchSlaveMaster({
+    required Account slave,
+    required Account newMaster,
+    required String password,
+    required String server,
+    String? comment,
+  }) async {
+    if (slave.platform != Platform.mt4 && slave.platform != Platform.mt5) {
+      return const SwitchMasterResult.error(
+        SwitchMasterStage.delete,
+        'Switching master is only supported on MT4 / MT5 today.',
+      );
+    }
+    if (newMaster.platform != slave.platform) {
+      return const SwitchMasterResult.error(
+        SwitchMasterStage.delete,
+        'New master must be on the same platform as the slave.',
+      );
+    }
+    final loginInt = int.tryParse(slave.loginNumber);
+    if (loginInt == null) {
+      return const SwitchMasterResult.error(
+        SwitchMasterStage.delete,
+        'Slave is missing a parseable broker login.',
+      );
+    }
+    try {
+      final delResp = await _api.apiV1FollowUserIdDelete(
+        userId: slave.serverId,
+      );
+      final delOk = delResp.isSuccessful &&
+          (delResp.body?.success == true ||
+              (delResp.body?.message?.toLowerCase() ?? '').contains('success'));
+      if (!delOk) {
+        return SwitchMasterResult.error(
+          SwitchMasterStage.delete,
+          delResp.body?.message ?? 'Could not unfollow the current master.',
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) print('switchSlaveMaster delete error: $e');
+      return SwitchMasterResult.error(
+        SwitchMasterStage.delete,
+        'Network error while unfollowing the current master: $e',
+      );
+    }
+
+    try {
+      Response<StringResponseDto> regResp;
+      switch (slave.platform) {
+        case Platform.mt5:
+          regResp = await _api.apiV1RegisterSlaveForMT5Post(
+            userId: loginInt,
+            password: password,
+            server: server,
+            masterId: newMaster.serverId,
+            comment: comment,
+            copyOrderType: 0,
+          );
+          break;
+        case Platform.mt4:
+          regResp = await _api.apiV1RegisterSlaveMt4Post(
+            userId: loginInt,
+            password: password,
+            server: server,
+            masterId: newMaster.serverId,
+            comment: comment,
+            copyOrderType: 0,
+          );
+          break;
+        default:
+          // Already gated above, but keeps the switch exhaustive.
+          return const SwitchMasterResult.error(
+            SwitchMasterStage.register,
+            'Platform not supported for slave register.',
+          );
+      }
+      if (!regResp.isSuccessful) {
+        return SwitchMasterResult.error(
+          SwitchMasterStage.register,
+          regResp.error?.toString() ??
+              regResp.base.reasonPhrase ??
+              'Register call failed.',
+        );
+      }
+      return const SwitchMasterResult.ok();
+    } catch (e) {
+      if (kDebugMode) print('switchSlaveMaster register error: $e');
+      return SwitchMasterResult.error(
+        SwitchMasterStage.register,
+        'Network error while registering with the new master: $e',
+      );
     }
   }
 
@@ -1086,157 +1282,6 @@ class TradingRepository {
   /// Format DateTime as `yyyy-MM-dd` for the history endpoint.
   String _ymd(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-  Future<Map<String, dynamic>> updateTradingAccount({
-    required int userId,
-    required String platformType,
-    String? password,
-    String? server,
-    String? comment,
-    bool isMaster = true,
-    int? masterId,
-    // Additional fields for other platforms
-    String? clientId,
-    String? clientSecret,
-    String? refreshToken,
-    String? expireIn,
-    String? email,
-    String? accountName,
-    String? userName,
-    String? brokerId,
-  }) async {
-    try {
-      Response<StringResponseDto> response;
-      final platform = platformType.toUpperCase();
-
-      switch (platform) {
-        case 'MT4':
-          if (isMaster) {
-            response = await _api.apiV1UpdateMasterMt4Post(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: accountName ?? comment,
-            );
-          } else {
-            response = await _api.apiV1UpdateSlaveMt4Post(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: accountName ?? comment,
-            );
-          }
-          break;
-
-        case 'MT5':
-          if (isMaster) {
-            response = await _api.apiV1UpdateMasterMt5Post(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: accountName ?? comment,
-            );
-          } else {
-            response = await _api.apiV1UpdateSlaveMt5Post(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: accountName ?? comment,
-            );
-          }
-          break;
-
-        case 'CTRADER':
-          if (isMaster) {
-            response = await _api.apiV1UpdateMasterCtraderPost(
-              userId: userId,
-              refreshToken: refreshToken ?? '',
-              expireIn: int.tryParse(expireIn ?? '0'),
-              comment: comment,
-            );
-          } else {
-            response = await _api.apiV1UpdateSlaveCtraderPost(
-              userId: userId,
-              refreshToken: refreshToken ?? '',
-              expireIn: int.tryParse(expireIn ?? '0'),
-              comment: comment,
-            );
-          }
-          break;
-
-        case 'DXTRADE':
-          if (isMaster) {
-            response = await _api.apiV1UpdateMasterDxtradePost(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: comment,
-            );
-          } else {
-            response = await _api.apiV1UpdateSlaveDxtradePost(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: comment,
-            );
-          }
-          break;
-
-        case 'TRADELOCKER':
-          if (isMaster) {
-            response = await _api.apiV1UpdateMasterTradeLockerPost(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: comment,
-            );
-          } else {
-            response = await _api.apiV1UpdateSlaveTradeLockerPost(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: comment,
-            );
-          }
-          break;
-
-        case 'MATCHTRADE':
-          if (isMaster) {
-            response = await _api.apiV1UpdateMasterMatchTradePost(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: comment,
-            );
-          } else {
-            response = await _api.apiV1UpdateSlaveMatchTradePost(
-              userId: userId,
-              password: password,
-              server: server,
-              comment: comment,
-            );
-          }
-          break;
-
-        default:
-          return {'message': 'Unsupported platform: $platformType', 'success': false};
-      }
-
-      if (response.isSuccessful) {
-        return {
-          'message': response.body?.message ?? 'Update successful',
-          'success': true,
-        };
-      } else {
-        return {
-          'message': 'Update failed: ${response.error ?? response.base.reasonPhrase}',
-          'success': false,
-        };
-      }
-    } catch (e) {
-      return {'message': 'An error occurred: $e', 'success': false};
-    }
-  }
 
   Future<String> deleteTradingAccount({
     required int userId, // This is the ID displayed in the 'Account ID' column

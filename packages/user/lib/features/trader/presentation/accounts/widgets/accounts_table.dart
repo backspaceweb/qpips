@@ -8,7 +8,9 @@ import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
 
 import 'account_details_sheet.dart';
+import 'account_edit_dialog.dart';
 import 'slave_settings_dialog.dart';
+import 'switch_master_dialog.dart';
 
 /// Accounts table — search + platform filter + sortable rows.
 ///
@@ -19,17 +21,19 @@ import 'slave_settings_dialog.dart';
 /// real-time status via getStatusbyID + per-platform balance endpoints.
 class AccountsTable extends StatelessWidget {
   final List<AccountOwnership> accounts;
-  final int totalCount;
+  final List<AccountOwnership> allAccounts;
   final String search;
   final Platform? platformFilter;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<Platform?> onPlatformChanged;
   final VoidCallback onAccountChanged;
 
+  int get totalCount => allAccounts.length;
+
   const AccountsTable({
     super.key,
     required this.accounts,
-    required this.totalCount,
+    required this.allAccounts,
     required this.search,
     required this.platformFilter,
     required this.onSearchChanged,
@@ -75,6 +79,7 @@ class AccountsTable extends StatelessWidget {
           else
             _Table(
               accounts: accounts,
+              allAccounts: allAccounts,
               onAccountChanged: onAccountChanged,
             ),
         ],
@@ -201,9 +206,14 @@ class _FilterRow extends StatelessWidget {
 
 class _Table extends StatelessWidget {
   final List<AccountOwnership> accounts;
+  final List<AccountOwnership> allAccounts;
   final VoidCallback onAccountChanged;
 
-  const _Table({required this.accounts, required this.onAccountChanged});
+  const _Table({
+    required this.accounts,
+    required this.allAccounts,
+    required this.onAccountChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -214,6 +224,7 @@ class _Table extends StatelessWidget {
         for (var i = 0; i < accounts.length; i++) ...[
           _AccountRow(
             account: accounts[i],
+            allAccounts: allAccounts,
             onChanged: onAccountChanged,
           ),
           if (i != accounts.length - 1)
@@ -243,7 +254,7 @@ class _HeaderRow extends StatelessWidget {
           Expanded(flex: 2, child: Text('BALANCE', style: style)),
           Expanded(flex: 2, child: Text('CONNECTION', style: style)),
           Expanded(flex: 2, child: Text('STATUS', style: style)),
-          SizedBox(width: 140, child: Text('ACTIONS', style: style)),
+          SizedBox(width: 260, child: Text('ACTIONS', style: style)),
         ],
       ),
     );
@@ -252,8 +263,13 @@ class _HeaderRow extends StatelessWidget {
 
 class _AccountRow extends StatefulWidget {
   final AccountOwnership account;
+  final List<AccountOwnership> allAccounts;
   final VoidCallback onChanged;
-  const _AccountRow({required this.account, required this.onChanged});
+  const _AccountRow({
+    required this.account,
+    required this.allAccounts,
+    required this.onChanged,
+  });
 
   @override
   State<_AccountRow> createState() => _AccountRowState();
@@ -261,6 +277,7 @@ class _AccountRow extends StatefulWidget {
 
 class _AccountRowState extends State<_AccountRow> {
   bool _deleting = false;
+  bool _toggling = false;
 
   Account _toAccount() {
     final acc = widget.account;
@@ -289,6 +306,69 @@ class _AccountRowState extends State<_AccountRow> {
       barrierColor: AppColors.overlay,
       builder: (_) => AccountDetailsSheet(account: _toAccount()),
     );
+  }
+
+  void _openEdit() {
+    showDialog<void>(
+      context: context,
+      barrierColor: AppColors.overlay,
+      builder: (_) => AccountEditDialog(
+        account: widget.account,
+        onUpdated: widget.onChanged,
+      ),
+    );
+  }
+
+  void _openSwitchMaster() {
+    showDialog<void>(
+      context: context,
+      barrierColor: AppColors.overlay,
+      builder: (_) => SwitchMasterDialog(
+        slave: widget.account,
+        ownedAccounts: widget.allAccounts,
+        onSwitched: widget.onChanged,
+      ),
+    );
+  }
+
+  Future<void> _toggleActivation() async {
+    final acc = widget.account;
+    final activate = acc.mirroringDisabled; // currently disabled → activating
+    setState(() => _toggling = true);
+    try {
+      final repo = context.read<TradingRepository>();
+      final ok = await repo.toggleAccountActivation(
+        account: _toAccount(),
+        activate: activate,
+      );
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              activate
+                  ? "Couldn't resume mirroring. Try again in a moment."
+                  : "Couldn't pause mirroring. Try again in a moment.",
+            ),
+            backgroundColor: AppColors.loss,
+          ),
+        );
+        setState(() => _toggling = false);
+        return;
+      }
+      // Edge Function flipped mirroring_disabled in account_ownership
+      // on a successful POST — we just need the parent to re-read.
+      widget.onChanged();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Couldn't toggle account: $e"),
+          backgroundColor: AppColors.loss,
+        ),
+      );
+      setState(() => _toggling = false);
+    }
   }
 
   Future<void> _confirmDelete() async {
@@ -418,7 +498,7 @@ class _AccountRowState extends State<_AccountRow> {
             child: _StatusPill(disabled: acc.mirroringDisabled),
           ),
           SizedBox(
-            width: 140,
+            width: 260,
             child: _deleting
                 ? const Center(
                     child: SizedBox(
@@ -455,6 +535,42 @@ class _AccountRowState extends State<_AccountRow> {
                           onPressed: _openSettings,
                           tooltip: 'Slave settings',
                         ),
+                      // Pencil — edit display name + rotate password/
+                      // server. MT4/MT5 only; greyed out for other
+                      // platforms since the update endpoint isn't
+                      // wired for them yet.
+                      _EditButton(
+                        platformSupported: acc.platform == Platform.mt4 ||
+                            acc.platform == Platform.mt5,
+                        onPressed: _openEdit,
+                      ),
+                      // Switch master — slaves only. Trading API has
+                      // no rebind endpoint, so this is delete +
+                      // re-register internally.
+                      if (acc.accountType == AccountType.slave)
+                        IconButton(
+                          icon: const Icon(Icons.swap_horiz, size: 18),
+                          color: (acc.platform == Platform.mt4 ||
+                                  acc.platform == Platform.mt5)
+                              ? AppColors.textMuted
+                              : AppColors.textMuted.withValues(alpha: 0.4),
+                          onPressed: (acc.platform == Platform.mt4 ||
+                                  acc.platform == Platform.mt5)
+                              ? _openSwitchMaster
+                              : null,
+                          tooltip: 'Switch master',
+                        ),
+                      // Pause/Resume — flips mirroring on the trading
+                      // API + DB. MT4/MT5 only; greyed out for other
+                      // platforms since the trading API's activate
+                      // endpoint isn't wired for them yet.
+                      _ToggleActivationButton(
+                        disabled: acc.mirroringDisabled,
+                        platformSupported: acc.platform == Platform.mt4 ||
+                            acc.platform == Platform.mt5,
+                        loading: _toggling,
+                        onPressed: _toggleActivation,
+                      ),
                       IconButton(
                         icon: const Icon(
                           Icons.delete_outline,
@@ -495,6 +611,79 @@ class _TypePill extends StatelessWidget {
           letterSpacing: 0.5,
         ),
       ),
+    );
+  }
+}
+
+class _EditButton extends StatelessWidget {
+  final bool platformSupported;
+  final VoidCallback onPressed;
+
+  const _EditButton({
+    required this.platformSupported,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.edit_outlined, size: 18),
+      color: platformSupported
+          ? AppColors.textMuted
+          : AppColors.textMuted.withValues(alpha: 0.4),
+      onPressed: platformSupported ? onPressed : null,
+      tooltip: platformSupported
+          ? 'Edit account'
+          : 'Edit not available on this platform yet',
+    );
+  }
+}
+
+class _ToggleActivationButton extends StatelessWidget {
+  final bool disabled;
+  final bool platformSupported;
+  final bool loading;
+  final VoidCallback onPressed;
+
+  const _ToggleActivationButton({
+    required this.disabled,
+    required this.platformSupported,
+    required this.loading,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const SizedBox(
+        width: 40,
+        height: 40,
+        child: Center(
+          child: SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    final tooltip = !platformSupported
+        ? 'Pause/resume not available on this platform yet'
+        : disabled
+            ? 'Resume mirroring'
+            : 'Pause mirroring';
+    return IconButton(
+      icon: Icon(
+        disabled ? Icons.play_arrow_outlined : Icons.pause_circle_outline,
+        size: 18,
+      ),
+      color: !platformSupported
+          ? AppColors.textMuted.withValues(alpha: 0.4)
+          : disabled
+              ? AppColors.profit
+              : AppColors.warning,
+      onPressed: platformSupported ? onPressed : null,
+      tooltip: tooltip,
     );
   }
 }
