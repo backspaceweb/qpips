@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:qp_core/domain/plan_tier.dart';
 import 'package:qp_core/domain/user_subscription.dart';
 import 'package:qp_core/repositories/subscription_repository.dart';
 import 'package:qp_design/app_colors.dart';
@@ -69,102 +70,111 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.xl,
-            AppSpacing.lg,
-            AppSpacing.xl,
-            AppSpacing.md,
-          ),
-          color: AppColors.surfaceMuted,
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'A daily cron runs renewals at 00:00 UTC. Use the '
-                  'button to force a pass for testing.',
-                  style: AppTypography.bodySmall,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              ElevatedButton.icon(
-                onPressed: _running ? null : _runRenewals,
-                icon: _running
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.textOnDark,
-                        ),
-                      )
-                    : const Icon(Icons.refresh, size: 16),
-                label: const Text('Run renewals now'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryAccent,
-                  foregroundColor: AppColors.textOnDark,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.lg,
-                    vertical: AppSpacing.md,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: RefreshIndicator(
-            color: AppColors.primaryAccent,
-            onRefresh: () async {
-              _refresh();
-              await _future;
-            },
-            child: FutureBuilder<List<UserSubscription>>(
-        future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) {
-            return const Center(
-              child: CircularProgressIndicator(
+    return FutureBuilder<List<UserSubscription>>(
+      future: _future,
+      builder: (context, snap) {
+        final loading = snap.connectionState != ConnectionState.done;
+        final subs = snap.data ?? const <UserSubscription>[];
+        final agg = _Aggregates.compute(subs);
+        return Column(
+          children: [
+            _InventoryStrip(agg: agg, loading: loading),
+            _renewalsBanner(),
+            Expanded(
+              child: RefreshIndicator(
                 color: AppColors.primaryAccent,
+                onRefresh: () async {
+                  _refresh();
+                  await _future;
+                },
+                child: _buildList(loading: loading, error: snap.error, subs: subs),
               ),
-            );
-          }
-          if (snap.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xl),
-                child: Text(
-                  "Couldn't load subscriptions: ${snap.error}",
-                  style: AppTypography.bodySmall.copyWith(
-                    color: AppColors.loss,
-                  ),
-                ),
-              ),
-            );
-          }
-          final subs = snap.data ?? const <UserSubscription>[];
-          if (subs.isEmpty) {
-            return _emptyState();
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            itemCount: subs.length + 1,
-            separatorBuilder: (_, __) => const SizedBox.shrink(),
-            itemBuilder: (_, i) {
-              if (i == 0) return const _Header();
-              return _SubscriptionRow(sub: subs[i - 1]);
-            },
-          );
-        },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _renewalsBanner() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.lg,
+        AppSpacing.xl,
+        AppSpacing.md,
+      ),
+      color: AppColors.surfaceMuted,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'A daily cron runs renewals at 00:00 UTC. Use the '
+              'button to force a pass for testing.',
+              style: AppTypography.bodySmall,
             ),
           ),
+          const SizedBox(width: AppSpacing.md),
+          ElevatedButton.icon(
+            onPressed: _running ? null : _runRenewals,
+            icon: _running
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.textOnDark,
+                    ),
+                  )
+                : const Icon(Icons.refresh, size: 16),
+            label: const Text('Run renewals now'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryAccent,
+              foregroundColor: AppColors.textOnDark,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.md,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList({
+    required bool loading,
+    required Object? error,
+    required List<UserSubscription> subs,
+  }) {
+    if (loading) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primaryAccent),
+      );
+    }
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Text(
+            "Couldn't load subscriptions: $error",
+            style: AppTypography.bodySmall.copyWith(color: AppColors.loss),
+          ),
         ),
-      ],
+      );
+    }
+    if (subs.isEmpty) return _emptyState();
+    return ListView.separated(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      itemCount: subs.length + 1,
+      separatorBuilder: (_, __) => const SizedBox.shrink(),
+      itemBuilder: (_, i) {
+        if (i == 0) return const _Header();
+        return _SubscriptionRow(sub: subs[i - 1]);
+      },
     );
   }
 
@@ -365,5 +375,268 @@ class _StatusChip extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Client-side aggregation of all subscription rows. Computes:
+///   - totalSlots / activeCount across status='active' rows only
+///   - totalBooked = sum of total_paid (lifetime revenue from currently
+///     active subs — does NOT include expired/cancelled)
+///   - mrr = sum of total_paid / commitment_months (effective monthly
+///     recurring revenue, normalised across commitment lengths)
+///   - byTier = per-tier breakdown for the inventory strip
+class _Aggregates {
+  final int totalSlots;
+  final int activeCount;
+  final double totalBooked;
+  final double mrr;
+  final List<_TierAgg> byTier;
+
+  const _Aggregates._({
+    required this.totalSlots,
+    required this.activeCount,
+    required this.totalBooked,
+    required this.mrr,
+    required this.byTier,
+  });
+
+  factory _Aggregates.compute(List<UserSubscription> all) {
+    final perTier = {
+      for (final t in PlanTier.values) t: _TierAgg(t),
+    };
+    var totalSlots = 0;
+    var activeCount = 0;
+    var totalBooked = 0.0;
+    var mrr = 0.0;
+    for (final s in all) {
+      if (!s.isActive) continue;
+      activeCount++;
+      totalSlots += s.slotCount;
+      totalBooked += s.totalPaid;
+      if (s.commitmentMonths > 0) {
+        mrr += s.totalPaid / s.commitmentMonths;
+      }
+      final agg = perTier[s.tier]!;
+      agg.count++;
+      agg.slots += s.slotCount;
+      agg.revenue += s.totalPaid;
+      if (s.commitmentMonths > 0) {
+        agg.slotMonths += s.slotCount * s.commitmentMonths;
+      }
+    }
+    return _Aggregates._(
+      totalSlots: totalSlots,
+      activeCount: activeCount,
+      totalBooked: totalBooked,
+      mrr: mrr,
+      byTier: PlanTier.values.map((t) => perTier[t]!).toList(),
+    );
+  }
+}
+
+class _TierAgg {
+  final PlanTier tier;
+  int count = 0;
+  int slots = 0;
+  double revenue = 0;
+  int slotMonths = 0;
+
+  _TierAgg(this.tier);
+
+  /// Effective $/slot/month — divides lifetime revenue across the slot-
+  /// months actually purchased. Useful sanity check: should fall within
+  /// the tier's configured base price (after commitment discount).
+  double? get effectivePerSlotMonth =>
+      slotMonths == 0 ? null : revenue / slotMonths;
+}
+
+class _InventoryStrip extends StatelessWidget {
+  final _Aggregates agg;
+  final bool loading;
+
+  const _InventoryStrip({required this.agg, required this.loading});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.xl,
+        AppSpacing.xl,
+        AppSpacing.lg,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(
+          bottom: BorderSide(color: AppColors.surfaceBorder),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Slot Inventory', style: AppTypography.titleLarge),
+              const SizedBox(width: AppSpacing.sm),
+              if (loading)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primaryAccent,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Aggregated from active subscriptions only. Expired and '
+            'cancelled rows are excluded.',
+            style: AppTypography.bodySmall.copyWith(
+              color: AppColors.textMuted,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              _kpi('Slots Sold', agg.totalSlots.toString(),
+                  Icons.confirmation_number_outlined),
+              const SizedBox(width: AppSpacing.md),
+              _kpi('Active Subscriptions', agg.activeCount.toString(),
+                  Icons.people_outline),
+              const SizedBox(width: AppSpacing.md),
+              _kpi('Total Booked', _money(agg.totalBooked),
+                  Icons.account_balance_wallet_outlined,
+                  valueColor: AppColors.primaryAccent),
+              const SizedBox(width: AppSpacing.md),
+              _kpi('MRR', _money(agg.mrr), Icons.trending_up,
+                  valueColor: AppColors.profit),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            'BY TIER',
+            style: AppTypography.labelSmall.copyWith(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              for (var i = 0; i < agg.byTier.length; i++) ...[
+                if (i > 0) const SizedBox(width: AppSpacing.md),
+                Expanded(child: _tierCard(agg.byTier[i])),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kpi(String label, String value, IconData icon, {Color? valueColor}) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          border: Border.all(color: AppColors.surfaceBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 16, color: AppColors.textMuted),
+                const SizedBox(width: AppSpacing.xs),
+                Text(label,
+                    style: AppTypography.labelSmall.copyWith(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                    )),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              value,
+              style: AppTypography.headlineSmall.copyWith(
+                color: valueColor,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tierCard(_TierAgg t) {
+    final eff = t.effectivePerSlotMonth;
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.surfaceBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(t.tier.displayLabel,
+                  style: AppTypography.titleMedium.copyWith(fontSize: 14)),
+              const Spacer(),
+              Text(
+                '${t.count} sub${t.count == 1 ? '' : 's'}',
+                style: AppTypography.bodySmall.copyWith(
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            children: [
+              _tierStat('${t.slots}', 'slots'),
+              const SizedBox(width: AppSpacing.lg),
+              _tierStat(_money(t.revenue), 'revenue'),
+              const SizedBox(width: AppSpacing.lg),
+              _tierStat(
+                eff == null ? '—' : '\$${eff.toStringAsFixed(2)}',
+                '/slot/mo',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tierStat(String value, String label) {
+    return Row(
+      children: [
+        Text(value,
+            style: AppTypography.bodyMedium.copyWith(
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            )),
+        const SizedBox(width: 4),
+        Text(label,
+            style: AppTypography.labelSmall.copyWith(
+              color: AppColors.textMuted,
+              fontSize: 10,
+            )),
+      ],
+    );
+  }
+
+  String _money(double v) {
+    final whole = v.toStringAsFixed(2);
+    return '\$$whole';
   }
 }
