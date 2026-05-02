@@ -592,25 +592,100 @@ Deno.serve(async (req) => {
 
   // ---------------------------------------------------------------
   // Delete: ownership row is keyed on trading_account_id (= serverId),
-  // which is the same X the trading API takes in the path. Stream the
-  // body through; do the DB delete in parallel.
+  // which is the same X the trading API takes in the path.
+  //
+  // Resilience pattern (post-incident, 2026-05-02):
+  //   * Run the DB cleanup on either upstream.ok OR upstream "already
+  //     deleted" responses (404 / "not found" message). This makes the
+  //     delete idempotent — if a previous attempt left the trading API
+  //     side cleaned but Supabase orphaned, a retry can finish the job.
+  //   * If the DB cleanup errors, OVERRIDE the upstream response with a
+  //     500 so the client sees the failure and can retry. Silent
+  //     console.error left an orphan in account_ownership for the
+  //     2026-05-02 master-delete that took manual SQL to clean.
+  //   * Use { count: "exact" } to log when 0 rows matched — diagnostic
+  //     hint that something upstream went wrong (e.g. the trader tried
+  //     to delete an account that's already orphaned the OTHER way).
   // ---------------------------------------------------------------
-  if (req.method === "DELETE" && upstream.ok) {
+  if (req.method === "DELETE") {
     const deleteId = matchDeleteId(proxyPath);
     if (deleteId !== null) {
-      const adminClient = createClient(
-        SUPABASE_URL,
-        SUPABASE_SERVICE_ROLE_KEY,
-      );
-      const { error: delErr } = await adminClient
-        .from("account_ownership")
-        .delete()
-        .eq("trading_account_id", deleteId.toString());
-      if (delErr) {
-        console.error(
-          `account_ownership delete failed for serverId=${deleteId}:`,
-          delErr,
+      // Detect "already deleted" upstream so retries can still clean
+      // orphans. Need to read the body — clone first so the response
+      // we eventually stream back to the client is still readable.
+      let upstreamBodyText: string | null = null;
+      let isAlreadyDeleted = false;
+      if (!upstream.ok) {
+        try {
+          upstreamBodyText = await upstream.clone().text();
+          const lower = upstreamBodyText.toLowerCase();
+          isAlreadyDeleted = upstream.status === 404 ||
+            lower.includes("not found") ||
+            lower.includes("does not exist") ||
+            lower.includes("already deleted");
+        } catch (_) {/* leave isAlreadyDeleted false */}
+      }
+      const shouldCleanup = upstream.ok || isAlreadyDeleted;
+
+      if (shouldCleanup) {
+        const adminClient = createClient(
+          SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY,
         );
+        const { error: delErr, count } = await adminClient
+          .from("account_ownership")
+          .delete({ count: "exact" })
+          .eq("trading_account_id", Number(deleteId));
+
+        if (delErr) {
+          console.error(
+            `account_ownership delete failed for serverId=${deleteId}:`,
+            delErr,
+          );
+          return new Response(
+            JSON.stringify({
+              success: false,
+              message:
+                `Trading server delete OK but Supabase cleanup failed: ` +
+                `${delErr.message}. Click delete again to retry — the ` +
+                `cleanup is idempotent.`,
+              code: "OWNERSHIP_CLEANUP_FAILED",
+            }),
+            {
+              status: 500,
+              headers: { ...responseHeaders, "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        if ((count ?? 0) === 0) {
+          // No row to delete — could mean the account_ownership row was
+          // already gone (e.g. retry after a previous successful clean,
+          // or the row was never written for some reason). Not fatal,
+          // but log so we notice if it becomes a pattern.
+          console.warn(
+            `account_ownership delete matched 0 rows for serverId=${deleteId}` +
+              ` (upstream.ok=${upstream.ok}, alreadyDeleted=${isAlreadyDeleted})`,
+          );
+        }
+
+        // If we hit cleanup via "already deleted" upstream, return a
+        // synthetic success — the cleanup completed, which is what the
+        // user actually wanted.
+        if (!upstream.ok && isAlreadyDeleted) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message:
+                `Account already removed on trading server. Cleaned up ` +
+                `Supabase ownership row.`,
+            }),
+            {
+              status: 200,
+              headers: { ...responseHeaders, "Content-Type": "application/json" },
+            },
+          );
+        }
       }
     }
   }

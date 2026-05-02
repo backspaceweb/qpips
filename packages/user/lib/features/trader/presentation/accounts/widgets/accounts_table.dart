@@ -241,6 +241,11 @@ class _Table extends StatelessWidget {
         const Divider(height: 1, color: AppColors.surfaceBorder),
         for (var i = 0; i < accounts.length; i++) ...[
           _AccountRow(
+            // Key by serverId so Flutter matches row state by identity,
+            // not by list position. Without this, deleting one row
+            // shifts neighbors up and they inherit the deleted row's
+            // _deleting/_toggling spinner state.
+            key: ValueKey(accounts[i].tradingAccountId),
             account: accounts[i],
             allAccounts: allAccounts,
             listing: listingsByMaster[accounts[i].tradingAccountId],
@@ -293,6 +298,7 @@ class _AccountRow extends StatefulWidget {
   final String? connectionStatus;
   final VoidCallback onChanged;
   const _AccountRow({
+    super.key,
     required this.account,
     required this.allAccounts,
     required this.listing,
