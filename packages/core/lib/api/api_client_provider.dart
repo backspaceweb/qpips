@@ -7,6 +7,7 @@ import 'generated/api.swagger.dart';
 import '../interceptors/supabase_auth_interceptor.dart';
 import '../repositories/account_repository.dart';
 import '../repositories/auth_repository.dart';
+import '../repositories/operator_repository.dart';
 import '../repositories/provider_listing_repository.dart';
 import '../repositories/subscription_repository.dart';
 import '../repositories/trading_repository.dart';
@@ -58,6 +59,10 @@ class ApiClientProvider {
     Provider<ProviderListingRepository>(
       create: (_) =>
           SupabaseProviderListingRepository(Supabase.instance.client),
+    ),
+
+    Provider<OperatorRepository>(
+      create: (_) => SupabaseOperatorRepository(Supabase.instance.client),
     ),
   ];
 }

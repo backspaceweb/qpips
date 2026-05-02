@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:qp_core/domain/admin_alert.dart';
 import 'package:qp_core/domain/plan_tier.dart';
 import 'package:qp_core/domain/user_subscription.dart';
+import 'package:qp_core/repositories/operator_repository.dart';
 import 'package:qp_core/repositories/subscription_repository.dart';
-import 'package:qp_core/repositories/trading_repository.dart';
 import 'package:qp_design/app_colors.dart';
 import 'package:qp_design/app_spacing.dart';
 import 'package:qp_design/app_typography.dart';
@@ -30,22 +31,30 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
     _future = _load();
   }
 
-  /// Loads subscriptions + the operator's bought-capacity in parallel.
-  /// `accountLimit` comes from the trading API's getAPIInfo response —
-  /// can be null if the call fails (network, expired key, etc.). Strip
-  /// hides the capacity section when null rather than guessing.
+  /// Loads subscriptions + operator settings + active alerts in parallel.
+  ///
+  /// `accountLimit` reads from `operator_settings` (admin-set value),
+  /// not the trading API's getAPIInfo. This is intentional: the
+  /// `check_capacity_alerts()` cron uses operator_settings for its
+  /// threshold check, so the strip and the alerts must agree on the
+  /// same denominator. Operator updates the value via the editor
+  /// when they buy more capacity from the trading API team.
   Future<_SubsAndCapacity> _load() async {
     final subRepo = context.read<SubscriptionRepository>();
-    final tradingRepo = context.read<TradingRepository>();
+    final opRepo = context.read<OperatorRepository>();
     final results = await Future.wait([
       subRepo.listAllSubscriptions(),
-      tradingRepo.getAPIInfo(),
+      opRepo.getAccountLimit(),
+      opRepo.listActiveAlerts(),
     ]);
     final subs = results[0] as List<UserSubscription>;
-    final apiInfo = results[1] as Map<String, dynamic>?;
-    final raw = apiInfo == null ? null : apiInfo['accountLimit'];
-    final accountLimit = raw is num ? raw.toInt() : null;
-    return _SubsAndCapacity(subs: subs, accountLimit: accountLimit);
+    final accountLimit = results[1] as int?;
+    final alerts = results[2] as List<AdminAlert>;
+    return _SubsAndCapacity(
+      subs: subs,
+      accountLimit: accountLimit,
+      alerts: alerts,
+    );
   }
 
   void _refresh() {
@@ -91,13 +100,20 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
         final loading = snap.connectionState != ConnectionState.done;
         final subs = snap.data?.subs ?? const <UserSubscription>[];
         final accountLimit = snap.data?.accountLimit;
+        final alerts = snap.data?.alerts ?? const <AdminAlert>[];
         final agg = _Aggregates.compute(subs);
         return Column(
           children: [
+            if (alerts.isNotEmpty)
+              _AlertsBanner(
+                alerts: alerts,
+                onDismiss: _dismissAlert,
+              ),
             _InventoryStrip(
               agg: agg,
               loading: loading,
               accountLimit: accountLimit,
+              onEditAccountLimit: _editAccountLimit,
             ),
             _renewalsBanner(),
             Expanded(
@@ -114,6 +130,52 @@ class _SubscriptionsTabState extends State<SubscriptionsTab> {
         );
       },
     );
+  }
+
+  Future<void> _dismissAlert(AdminAlert a) async {
+    try {
+      await context.read<OperatorRepository>().dismissAlert(a.id);
+      if (!mounted) return;
+      _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Couldn't dismiss alert: $e"),
+          backgroundColor: AppColors.loss,
+        ),
+      );
+    }
+  }
+
+  Future<void> _editAccountLimit(int currentValue) async {
+    // Resolve repo BEFORE the await so we don't reference context across
+    // an async gap (the dialog future + the RPC future).
+    final opRepo = context.read<OperatorRepository>();
+    final newValue = await showDialog<int>(
+      context: context,
+      builder: (_) => _AccountLimitDialog(currentValue: currentValue),
+    );
+    if (newValue == null || newValue == currentValue) return;
+    try {
+      await opRepo.setAccountLimit(newValue);
+      if (!mounted) return;
+      // Re-run capacity check immediately so any threshold flip surfaces
+      // without waiting an hour for the cron.
+      try {
+        await opRepo.runCapacityCheck();
+      } catch (_) {/* non-fatal */}
+      if (!mounted) return;
+      _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Couldn't update account limit: $e"),
+          backgroundColor: AppColors.loss,
+        ),
+      );
+    }
   }
 
   Widget _renewalsBanner() {
@@ -398,15 +460,21 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
-/// Combined load result: subscriptions + the operator's bought capacity
-/// (accountLimit from getAPIInfo). Capacity is nullable because the
-/// trading API call can fail or return an unexpected shape; the strip
-/// hides the capacity row when null rather than guessing.
+/// Combined load result: subscriptions + operator-configured capacity +
+/// un-dismissed admin alerts. Capacity is nullable when the
+/// `operator_settings.account_limit` row is missing (fresh install
+/// before the migration's seed); the strip hides the capacity section
+/// in that case rather than guessing.
 class _SubsAndCapacity {
   final List<UserSubscription> subs;
   final int? accountLimit;
+  final List<AdminAlert> alerts;
 
-  const _SubsAndCapacity({required this.subs, required this.accountLimit});
+  const _SubsAndCapacity({
+    required this.subs,
+    required this.accountLimit,
+    required this.alerts,
+  });
 }
 
 /// Client-side aggregation of all subscription rows. Computes:
@@ -485,14 +553,21 @@ class _InventoryStrip extends StatelessWidget {
   final _Aggregates agg;
   final bool loading;
 
-  /// Operator's bought slot capacity from the trading API team. Null
-  /// when getAPIInfo failed — the capacity row hides in that case.
+  /// Operator's bought slot capacity from the trading API team — read
+  /// from `operator_settings.account_limit`. Null when the row is
+  /// missing (fresh install before migration's seed); the capacity
+  /// section hides in that case.
   final int? accountLimit;
+
+  /// Callback for the "Edit" button next to the capacity number. Passes
+  /// the current value as a starting point for the dialog.
+  final ValueChanged<int>? onEditAccountLimit;
 
   const _InventoryStrip({
     required this.agg,
     required this.loading,
     required this.accountLimit,
+    this.onEditAccountLimit,
   });
 
   @override
@@ -661,6 +736,33 @@ class _InventoryStrip extends StatelessWidget {
                   letterSpacing: 0.8,
                 ),
               ),
+              const SizedBox(width: AppSpacing.sm),
+              if (onEditAccountLimit != null)
+                InkWell(
+                  onTap: () => onEditAccountLimit!(limit),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.edit_outlined,
+                            size: 13, color: AppColors.primaryAccent),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Edit',
+                          style: AppTypography.labelSmall.copyWith(
+                            color: AppColors.primaryAccent,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               const Spacer(),
               Text(
                 pctLabel,
@@ -786,5 +888,198 @@ class _InventoryStrip extends StatelessWidget {
   String _money(double v) {
     final whole = v.toStringAsFixed(2);
     return '\$$whole';
+  }
+}
+
+/// Banner above the inventory strip listing un-dismissed admin alerts.
+/// Color + icon track severity; each row has its own dismiss button so
+/// admin can clear individual alerts without affecting unrelated ones.
+class _AlertsBanner extends StatelessWidget {
+  final List<AdminAlert> alerts;
+  final ValueChanged<AdminAlert> onDismiss;
+
+  const _AlertsBanner({required this.alerts, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.md,
+        AppSpacing.xl,
+        0,
+      ),
+      child: Column(
+        children: [
+          for (final a in alerts) ...[
+            _AlertRow(alert: a, onDismiss: () => onDismiss(a)),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AlertRow extends StatelessWidget {
+  final AdminAlert alert;
+  final VoidCallback onDismiss;
+
+  const _AlertRow({required this.alert, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final (color, icon) = switch (alert.severity) {
+      AlertSeverity.critical => (AppColors.loss, Icons.error_outline),
+      AlertSeverity.warning => (AppColors.warning, Icons.warning_amber_rounded),
+      AlertSeverity.info => (AppColors.info, Icons.info_outline),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alert.message,
+                  style: AppTypography.bodyMedium.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${alert.severity.wireValue.toUpperCase()} · '
+                  'opened ${_relativeTime(alert.createdAt)}',
+                  style: AppTypography.labelSmall.copyWith(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          TextButton(
+            onPressed: onDismiss,
+            style: TextButton.styleFrom(
+              foregroundColor: color,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+            ),
+            child: const Text('Dismiss'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _relativeTime(DateTime dt) {
+    final delta = DateTime.now().difference(dt);
+    if (delta.inMinutes < 1) return 'just now';
+    if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
+    if (delta.inHours < 24) return '${delta.inHours}h ago';
+    return '${delta.inDays}d ago';
+  }
+}
+
+/// Modal for editing `operator_settings.account_limit`. Validates that
+/// the new value is a non-negative int before letting the caller submit.
+class _AccountLimitDialog extends StatefulWidget {
+  final int currentValue;
+
+  const _AccountLimitDialog({required this.currentValue});
+
+  @override
+  State<_AccountLimitDialog> createState() => _AccountLimitDialogState();
+}
+
+class _AccountLimitDialogState extends State<_AccountLimitDialog> {
+  late final TextEditingController _ctrl;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.currentValue.toString());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final parsed = int.tryParse(_ctrl.text.trim());
+    if (parsed == null || parsed < 0) {
+      setState(() => _error = 'Enter a non-negative integer.');
+      return;
+    }
+    Navigator.of(context).pop(parsed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+      ),
+      title: Text('Update account limit', style: AppTypography.titleLarge),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Set this to the slot count the trading API team currently '
+            "covers for your operator key. Update it whenever you buy "
+            'more capacity — the alerts cron uses this value as the '
+            'denominator for the 80% / 95% threshold checks.',
+            style: AppTypography.bodySmall,
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          TextField(
+            controller: _ctrl,
+            keyboardType: TextInputType.number,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Account limit',
+              errorText: _error,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              ),
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          style: TextButton.styleFrom(foregroundColor: AppColors.primaryAccent),
+          onPressed: _submit,
+          child: const Text('Save'),
+        ),
+      ],
+    );
   }
 }
