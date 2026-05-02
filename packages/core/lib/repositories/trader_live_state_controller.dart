@@ -116,42 +116,40 @@ class TraderLiveStateController extends ChangeNotifier {
 
   Future<void> _fullReload() async {
     final accounts = await _accountRepo.listMyAccounts();
+    // Single round-trip per account: getAccountLiveSnapshot returns
+    // the computed state AND the raw open-orders list. Used to be a
+    // separate getOpenOrders fetch for the close-detection seed below
+    // — that doubled the per-account load latency for no reason.
     final liveResults = await Future.wait([
       ...[
         for (final a in accounts)
-          _trading.getAccountLiveState(account: _accountFor(a)),
+          _trading.getAccountLiveSnapshot(account: _accountFor(a)),
       ],
       _trading.getAccountStatuses(
         serverIds: accounts.map((a) => a.tradingAccountId).toList(),
       ),
     ]);
-    final liveStates =
-        liveResults.sublist(0, accounts.length).cast<SlaveLiveState>();
+    final snapshots = liveResults
+        .sublist(0, accounts.length)
+        .cast<({SlaveLiveState live, List<TradeOrder> openOrders})>();
     final statuses = liveResults.last as Map<int, String>;
-
-    // Seed last-seen tickets from a fresh openOrders snapshot so the
-    // first 3s tick has a baseline.
-    final initialOpenOrders = await Future.wait([
-      for (final a in accounts)
-        _trading.getOpenOrders(account: _accountFor(a)),
-    ]);
 
     _accounts = accounts;
     _liveStateByAccount = {
       for (var i = 0; i < accounts.length; i++)
-        accounts[i].tradingAccountId: liveStates[i],
+        accounts[i].tradingAccountId: snapshots[i].live,
     };
     _statusByAccount = statuses;
     _openOrdersByAccount = {
       for (var i = 0; i < accounts.length; i++)
-        accounts[i].tradingAccountId: initialOpenOrders[i],
+        accounts[i].tradingAccountId: snapshots[i].openOrders,
     };
     _lastSeenTickets
       ..clear()
       ..addAll({
         for (var i = 0; i < accounts.length; i++)
           accounts[i].tradingAccountId: {
-            for (final o in initialOpenOrders[i]) o.ticket,
+            for (final o in snapshots[i].openOrders) o.ticket,
           },
       });
     _lastUpdatedAt = DateTime.now();

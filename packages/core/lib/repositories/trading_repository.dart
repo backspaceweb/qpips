@@ -1400,14 +1400,19 @@ class TradingRepository {
   }
 
   /// Live snapshot for any account (master or slave): synthetic
-  /// balance + equity + P&L breakdowns + open trade count. Single
-  /// all-time history pull plus open orders; today's P&L is filtered
-  /// client-side from the same history list. Falls back to
-  /// [SlaveLiveState.empty] on any failure so callers render without
-  /// nulls.
-  Future<SlaveLiveState> getAccountLiveState({required Account account}) async {
+  /// balance + equity + P&L breakdowns + open trade count, AND the raw
+  /// open-orders list that produced them. Single all-time history pull
+  /// plus open orders; today's P&L is filtered client-side from the
+  /// same history list. Falls back to [SlaveLiveState.empty] + an empty
+  /// orders list on any failure so callers render without nulls.
+  ///
+  /// Returning both the computed state AND the raw orders lets
+  /// orchestrators (TraderLiveStateController) seed close-detection
+  /// caches without re-fetching open orders separately.
+  Future<({SlaveLiveState live, List<TradeOrder> openOrders})>
+      getAccountLiveSnapshot({required Account account}) async {
     if (account.platform != Platform.mt4 && account.platform != Platform.mt5) {
-      return SlaveLiveState.empty;
+      return (live: SlaveLiveState.empty, openOrders: const <TradeOrder>[]);
     }
     try {
       final now = DateTime.now();
@@ -1450,17 +1455,28 @@ class TradingRepository {
         openPnl += o.profit + o.commission + o.swap;
       }
 
-      return SlaveLiveState(
-        balance: balance,
-        equity: balance + openPnl,
-        openPnl: openPnl,
-        todayPnl: todayPnl,
-        openTradesCount: open.length,
+      return (
+        live: SlaveLiveState(
+          balance: balance,
+          equity: balance + openPnl,
+          openPnl: openPnl,
+          todayPnl: todayPnl,
+          openTradesCount: open.length,
+        ),
+        openOrders: open,
       );
     } catch (e) {
-      if (kDebugMode) print('getAccountLiveState error: $e');
-      return SlaveLiveState.empty;
+      if (kDebugMode) print('getAccountLiveSnapshot error: $e');
+      return (live: SlaveLiveState.empty, openOrders: const <TradeOrder>[]);
     }
+  }
+
+  /// Convenience: same as [getAccountLiveSnapshot] but returns only the
+  /// computed live state. Use the snapshot variant if you also need the
+  /// raw orders to avoid a redundant fetch.
+  Future<SlaveLiveState> getAccountLiveState({required Account account}) async {
+    final snap = await getAccountLiveSnapshot(account: account);
+    return snap.live;
   }
 
   /// Per-account broker connection status. Returns a map keyed by
